@@ -64,10 +64,24 @@ function formatDate(ts) {
 
 // ================= DATA ACCESS =================
 async function getBudgets() {
-  const { data } = await supabase.from('budgets').select('*');
-  const budgets = {};
-  (data || []).forEach(row => budgets[row.category] = row.budget);
-  return budgets;
+  try {
+    console.log('getBudgets: fetching from Supabase');
+    const { data, error } = await supabase.from('budgets').select('*');
+    
+    if (error) {
+      console.error('Supabase error in getBudgets:', error);
+      throw error;
+    }
+    
+    console.log('getBudgets: raw data:', data);
+    const budgets = {};
+    (data || []).forEach(row => budgets[row.category] = row.budget);
+    console.log('getBudgets: processed budgets:', budgets);
+    return budgets;
+  } catch (error) {
+    console.error('getBudgets catch:', error);
+    throw error;
+  }
 }
 
 async function setBudget(category, budget) {
@@ -487,6 +501,11 @@ Examples: 90-grocery, 90 grocery
   }
   
   await sendMessage(chatId, `✅ Expense Recorded\n\n👤 ${user}\n💰 Total: ₹${totalAdded}\n\n${confirm.join('\n\n')}`, messageId);
+  } catch (error) {
+    console.error('handleCommand error:', error);
+    console.error('Error stack:', error.stack);
+    throw error;
+  }
 }
 
 // ================= WEBHOOK HANDLER =================

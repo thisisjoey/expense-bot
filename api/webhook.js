@@ -91,8 +91,7 @@ async function getBudgets() {
     console.log('getBudgets: fetching from Supabase');
     const { data, error } = await supabase
       .from('budgets')
-      .select('*')
-      .timeout(5000);
+      .select('*');
     
     if (error) {
       console.error('Supabase error in getBudgets:', error);
@@ -124,8 +123,7 @@ async function getExpenses() {
     const { data } = await supabase
       .from('expenses')
       .select('*')
-      .order('created_at', { ascending: false })
-      .timeout(5000);
+      .order('created_at', { ascending: false });
     return (data || []).map(row => ({
       id: row.message_id,
       user: row.user_name,
@@ -154,7 +152,7 @@ async function addExpense(messageId, user, amount, category, comment) {
 
 async function getMembers() {
   return retryOperation(async () => {
-    const { data } = await supabase.from('members').select('user_name').timeout(5000);
+    const { data } = await supabase.from('members').select('user_name');
     return (data || []).map(row => row.user_name);
   });
 }
@@ -174,7 +172,7 @@ async function removeMember(userName) {
 
 async function getSettlements() {
   return retryOperation(async () => {
-    const { data } = await supabase.from('settlements').select('*').timeout(5000);
+    const { data } = await supabase.from('settlements').select('*');
     const settlements = {};
     let lastSettledDate = null;
     (data || []).forEach(row => {

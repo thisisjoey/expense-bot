@@ -147,7 +147,7 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
 
   // Build message
   const sections = [];
-  const divider = `${\"─\".repeat(70)}`;
+  const divider = `${"─".repeat(70)}`;
   
   if (critical.length > 0) {
     sections.push(`<b>🚨 CRITICAL (≥90%)</b>\n${divider}\n${critical.join("\n")}`);
@@ -816,7 +816,7 @@ Add one with:
         ([cat, budget]) => `${cat.padEnd(20)} │ ₹${budget.toString().padStart(8)}`
       );
       const header = `${'Category'.padEnd(20)} │ Budget`;
-      const divider = `${\"─\".repeat(20)}┼${\"─\".repeat(10)}`;
+      const divider = `${"─".repeat(20)}┼${"─".repeat(10)}`;
       await sendMessage(
         chatId,
         `📂 <b>Categories</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
@@ -1021,7 +1021,7 @@ Members are added automatically when they interact with the bot.`
         return `${numStr}. ${nameStr} │ @${m.username || "n/a"}`;
       });
       const header = `Rank  Name                 │ Username`;
-      const divider = `${\"─\".repeat(50)}`;
+      const divider = `${"─".repeat(50)}`;
 
       await sendMessage(
         chatId,
@@ -1162,7 +1162,7 @@ Use /addcategory to create categories first.`
         lines.push(`${status} ${catName} │ ${spentStr}/${budgetStr} │ ${percentStr} │ Left: ${leftStr}`);
       }
       const header = `   Category         │  Spent  /  Budget  │ Used% │ Remaining`;
-      const divider = `${\"─\".repeat(65)}`;
+      const divider = `${"─".repeat(65)}`;
 
       await sendMessage(chatId, `📊 <b>Summary</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>`);
       return res.status(200).send("OK");
@@ -1278,7 +1278,7 @@ Per person: ₹${perPerson.toFixed(2)}`
 
       const summaryText = `Total to settle    ₹${totalSpent.toFixed(2)}\nPer person share   ₹${perPerson.toFixed(2)}`;
       const header = `Debtor             → Creditor          │ Amount`;
-      const divider = `${\"─\".repeat(65)}`;
+      const divider = `${"─".repeat(65)}`;
 
       await sendMessage(chatId, `💸 <b>Settlements</b>\n\n<pre>${summaryText}\n${divider}\n${header}\n${divider}\n${settlements.join("\n")}</pre>`);
       return res.status(200).send("OK");
@@ -1520,7 +1520,7 @@ Expense not found or already reverted.`
         (a, b) => b[1] - a[1]
       )[0];
 
-      const statsText = `\nMetric              Value\n${\"─\".repeat(35)}\nTotal Spent        ₹${total.toFixed(2).padStart(12)}\nTotal Expenses     ${activeExpenses.length.toString().padStart(16)}\nAverage/Expense    ₹${avgPerExpense.toFixed(2).padStart(12)}\n${\"─\".repeat(35)}\nTop Spender        ${escapeHtml(topSpenderName).padEnd(12)} (₹${topSpender[1].toFixed(2)})\nTop Category       ${topCategory[0].padEnd(12)} (₹${topCategory[1].toFixed(2)})`;
+      const statsText = `\nMetric              Value\n${"─".repeat(35)}\nTotal Spent        ₹${total.toFixed(2).padStart(12)}\nTotal Expenses     ${activeExpenses.length.toString().padStart(16)}\nAverage/Expense    ₹${avgPerExpense.toFixed(2).padStart(12)}\n${"─".repeat(35)}\nTop Spender        ${escapeHtml(topSpenderName).padEnd(12)} (₹${topSpender[1].toFixed(2)})\nTop Category       ${topCategory[0].padEnd(12)} (₹${topCategory[1].toFixed(2)})`;
 
       await sendMessage(
         chatId,
@@ -1561,7 +1561,7 @@ Expense not found or already reverted.`
         return `${medal} ${rankStr}. ${nameStr} │ ${amountStr}`;
       });
       const header = `   Rank  Name                 │ Amount`;
-      const divider = `${\"─\".repeat(50)}`;
+      const divider = `${"─".repeat(50)}`;
 
       await sendMessage(chatId, `🏆 <b>Top Spenders</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>`);
       return res.status(200).send("OK");
@@ -1605,7 +1605,7 @@ Expense not found or already reverted.`
           return `${catStr} │ ${amountStr}`;
         });
       const header = `Category           │ Amount`;
-      const divider = `${\"─\".repeat(42)}`;
+      const divider = `${"─".repeat(42)}`;
 
       const summaryText = `Total Spent     ₹${total.toFixed(2)}\nExpenses Count  ${monthlyExpenses.length}`;
 
@@ -1658,7 +1658,7 @@ Expense not found or already reverted.`
         return `${dateStr} │ ${nameStr} │ ${amountStr} │ ${e.category} ${settled}`;
       });
       const header = `Date     │ User            │ Amount  │ Category`;
-      const divider = `${\"─\".repeat(60)}`;
+      const divider = `${"─".repeat(60)}`;
 
       const more =
         results.length > 10 ? `\n\n<i>+${results.length - 10} more</i>` : "";
@@ -1703,7 +1703,7 @@ Expense not found or already reverted.`
         return `${dateStr} │ ${nameStr} │ ${amountStr} │ ${e.category} ${settled}`;
       });
       const header = `Date/Time       │ User            │ Amount  │ Category`;
-      const divider = `${\"─\".repeat(65)}`;
+      const divider = `${"─".repeat(65)}`;
 
       await sendMessage(
         chatId,

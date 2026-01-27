@@ -6,7 +6,18 @@ const BOT_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        'Connection': 'keep-alive',
+      },
+    },
+  }
 );
 
 // ================= HELPERS =================
@@ -62,11 +73,26 @@ function formatDate(ts) {
   });
 }
 
-// ================= DATA ACCESS =================
+// ================= DATA ACCESS WITH RETRY =================
+async function retryOperation(operation, maxRetries = 2) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error.message);
+      if (i === maxRetries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+}
+
 async function getBudgets() {
-  try {
+  return retryOperation(async () => {
     console.log('getBudgets: fetching from Supabase');
-    const { data, error } = await supabase.from('budgets').select('*');
+    const { data, error } = await supabase
+      .from('budgets')
+      .select('*')
+      .timeout(5000);
     
     if (error) {
       console.error('Supabase error in getBudgets:', error);
@@ -78,87 +104,108 @@ async function getBudgets() {
     (data || []).forEach(row => budgets[row.category] = row.budget);
     console.log('getBudgets: processed budgets:', budgets);
     return budgets;
-  } catch (error) {
-    console.error('getBudgets catch:', error);
-    throw error;
-  }
+  });
 }
 
 async function setBudget(category, budget) {
-  await supabase.from('budgets').upsert({ category, budget });
+  return retryOperation(async () => {
+    await supabase.from('budgets').upsert({ category, budget });
+  });
 }
 
 async function deleteBudget(category) {
-  await supabase.from('budgets').delete().eq('category', category);
+  return retryOperation(async () => {
+    await supabase.from('budgets').delete().eq('category', category);
+  });
 }
 
 async function getExpenses() {
-  const { data } = await supabase.from('expenses').select('*').order('created_at', { ascending: false });
-  return (data || []).map(row => ({
-    id: row.message_id,
-    user: row.user_name,
-    amount: Number(row.amount),
-    category: row.category,
-    comment: row.comment,
-    ts: row.created_at,
-    discarded: row.discarded
-  }));
+  return retryOperation(async () => {
+    const { data } = await supabase
+      .from('expenses')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .timeout(5000);
+    return (data || []).map(row => ({
+      id: row.message_id,
+      user: row.user_name,
+      amount: Number(row.amount),
+      category: row.category,
+      comment: row.comment,
+      ts: row.created_at,
+      discarded: row.discarded
+    }));
+  });
 }
 
 async function addExpense(messageId, user, amount, category, comment) {
-  await supabase.from('expenses').insert({
-    message_id: messageId,
-    user_name: user,
-    amount,
-    category,
-    comment,
-    created_at: now(),
-    discarded: false
+  return retryOperation(async () => {
+    await supabase.from('expenses').insert({
+      message_id: messageId,
+      user_name: user,
+      amount,
+      category,
+      comment,
+      created_at: now(),
+      discarded: false
+    });
   });
 }
 
 async function getMembers() {
-  const { data } = await supabase.from('members').select('user_name');
-  return (data || []).map(row => row.user_name);
+  return retryOperation(async () => {
+    const { data } = await supabase.from('members').select('user_name').timeout(5000);
+    return (data || []).map(row => row.user_name);
+  });
 }
 
 async function addMember(userName) {
-  await supabase.from('members').upsert({ user_name: userName });
+  return retryOperation(async () => {
+    await supabase.from('members').upsert({ user_name: userName });
+  });
 }
 
 async function removeMember(userName) {
-  await supabase.from('members').delete().eq('user_name', userName);
-  await supabase.from('settlements').delete().eq('user_name', userName);
+  return retryOperation(async () => {
+    await supabase.from('members').delete().eq('user_name', userName);
+    await supabase.from('settlements').delete().eq('user_name', userName);
+  });
 }
 
 async function getSettlements() {
-  const { data } = await supabase.from('settlements').select('*');
-  const settlements = {};
-  let lastSettledDate = null;
-  (data || []).forEach(row => {
-    settlements[row.user_name] = row.settled;
-    if (row.last_settled_date) lastSettledDate = row.last_settled_date;
+  return retryOperation(async () => {
+    const { data } = await supabase.from('settlements').select('*').timeout(5000);
+    const settlements = {};
+    let lastSettledDate = null;
+    (data || []).forEach(row => {
+      settlements[row.user_name] = row.settled;
+      if (row.last_settled_date) lastSettledDate = row.last_settled_date;
+    });
+    return { settlements, lastSettledDate };
   });
-  return { settlements, lastSettledDate };
 }
 
 async function markSettled(userName) {
-  await supabase.from('settlements').upsert({
-    user_name: userName,
-    settled: true
+  return retryOperation(async () => {
+    await supabase.from('settlements').upsert({
+      user_name: userName,
+      settled: true
+    });
   });
 }
 
 async function resetSettlements(members) {
-  await supabase.from('settlements').delete().neq('user_name', '');
-  const settlementsData = members.map(m => ({
-    user_name: m,
-    settled: false,
-    last_settled_date: now()
-  }));
-  if (settlementsData.length > 0) {
-    await supabase.from('settlements').insert(settlementsData);
-  }
+  return retryOperation(async () => {
+    await supabase.from('settlements').delete().neq('user_name', '');
+    const settlementsData = members.map(m => ({
+      user_name: m,
+      settled: false,
+      last_settled_date: now()
+    }));
+    if (settlementsData.length > 0) {
+      await supabase.from('settlements').insert(settlementsData);
+    }
+  });
 }
 
 // ================= EXCEL EXPORT =================
@@ -505,6 +552,9 @@ Examples: 90-grocery, 90 grocery
   } catch (error) {
     console.error('handleCommand error:', error);
     console.error('Error stack:', error.stack);
+    
+    // Send user-friendly error message
+    await sendMessage(chatId, '❌ Database connection error. Please try again in a moment.\n\nIf this persists, check your Supabase configuration.');
     throw error;
   }
 }

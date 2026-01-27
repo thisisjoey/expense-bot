@@ -167,6 +167,9 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
   else if (watch.length > 0) emoji = "📊";
 
   const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n${sections.join("\n\n")}`;
+
+  return {
+    hasAlerts,
     critical: critical.length,
     warning: warning.length,
     watch: watch.length,

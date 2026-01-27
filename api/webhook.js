@@ -1818,15 +1818,15 @@ Expense not found or already reverted.`
         `📆 This Month:`,
         `   Spent: ₹${monthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${monthPercent}%)`,
         ``,
-        `${"─".repeat(40)}`,
-        ``,
-        ``,
-        ``,
-        ``,
         `📈 Last Month (Planned vs Consumed):`,
-        `   ₹${lastMonthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${lastMonthPercent}%)`
-      ];
-
+        `   ₹${lastMonthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${lastMonthPercent}%)`,
+      
+      `${"─".repeat(8)}`,
+        ``,
+        ``,
+        ``,
+        ``
+        ];
       // Build category-wise sections
       const categoryLines = [];
       for (const cat of categories) {

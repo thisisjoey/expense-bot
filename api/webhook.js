@@ -11,15 +11,27 @@ const supabase = createClient(
 
 // ================= HELPERS =================
 async function sendMessage(chatId, text, replyTo) {
-  await fetch(`${BOT_API}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      reply_to_message_id: replyTo || undefined
-    })
-  });
+  console.log('Sending message to:', chatId);
+  try {
+    const response = await fetch(`${BOT_API}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        reply_to_message_id: replyTo || undefined
+      })
+    });
+    
+    const result = await response.json();
+    console.log('Telegram API response:', result);
+    
+    if (!result.ok) {
+      console.error('Telegram API error:', result);
+    }
+  } catch (error) {
+    console.error('Send message error:', error);
+  }
 }
 
 async function sendDocument(chatId, csvData, filename) {

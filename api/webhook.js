@@ -211,6 +211,7 @@ async function handleFastCommands(text, chatId) {
 /topspenders - Leaderboard
 /last 10 - Recent expenses
 /search &lt;term&gt; - Find expenses
+/budget - Budget breakdown (today, week, month + last month)
 /alerts - Budget warnings
 /clearall - Delete all expenses
 
@@ -1746,6 +1747,121 @@ Expense not found or already reverted.`
         chatId,
         `🗑️ <b>Cleared ${activeCount} expenses</b>`
       );
+      return res.status(200).send("OK");
+    }
+
+    /* ================= BUDGET BREAKDOWN ================= */
+    if (text === "/budget") {
+      const categories = Object.keys(data.budgets);
+      if (!categories.length) {
+        await sendMessage(
+          chatId,
+          `💼 <b>No Categories</b>\n\nUse /addcategory to create categories first.`
+        );
+        return res.status(200).send("OK");
+      }
+
+      const activeExpenses = data.expenses.filter((e) => !e.discarded);
+      const currentDate = new Date();
+      const currentDay = currentDate.getDate();
+      const currentMonth = currentDate.getMonth();
+      const currentYear = currentDate.getFullYear();
+
+      // Date boundaries for current period
+      const todayStart = new Date(currentYear, currentMonth, currentDay);
+      const weekStart = new Date(currentYear, currentMonth, currentDay - (currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1));
+      const monthStart = new Date(currentYear, currentMonth, 1);
+
+      // Date boundaries for last month
+      const lastMonthStart = new Date(currentYear, currentMonth - 1, 1);
+      const lastMonthEnd = new Date(currentYear, currentMonth, 0, 23, 59, 59);
+
+      // Calculate overall budgets
+      const totalMonthlyBudget = Object.values(data.budgets).reduce((sum, b) => sum + b, 0);
+      const totalDailyBudget = totalMonthlyBudget / 30;
+      const totalWeeklyBudget = (totalMonthlyBudget * 7) / 30;
+
+      // Overall current period spending
+      const todaySpent = activeExpenses
+        .filter((e) => new Date(e.ts) >= todayStart)
+        .reduce((sum, e) => sum + e.amount, 0);
+      const weekSpent = activeExpenses
+        .filter((e) => new Date(e.ts) >= weekStart)
+        .reduce((sum, e) => sum + e.amount, 0);
+      const monthSpent = activeExpenses
+        .filter((e) => new Date(e.ts) >= monthStart)
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      // Last month spending
+      const lastMonthSpent = activeExpenses
+        .filter((e) => {
+          const expDate = new Date(e.ts);
+          return expDate >= lastMonthStart && expDate <= lastMonthEnd;
+        })
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const todayPercent = totalDailyBudget > 0 ? ((todaySpent / totalDailyBudget) * 100).toFixed(1) : 0;
+      const weekPercent = totalWeeklyBudget > 0 ? ((weekSpent / totalWeeklyBudget) * 100).toFixed(1) : 0;
+      const monthPercent = totalMonthlyBudget > 0 ? ((monthSpent / totalMonthlyBudget) * 100).toFixed(1) : 0;
+      const lastMonthPercent = totalMonthlyBudget > 0 ? ((lastMonthSpent / totalMonthlyBudget) * 100).toFixed(1) : 0;
+
+      // Build overall budget section
+      const overallLines = [
+        `💼 <b>Overall Budget</b>`,
+        ``,
+        `📅 Today:`,
+        `   Spent: ₹${todaySpent.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)} (${todayPercent}%)`,
+        ``,
+        `📊 This Week:`,
+        `   Spent: ₹${weekSpent.toFixed(0)} / ₹${totalWeeklyBudget.toFixed(0)} (${weekPercent}%)`,
+        ``,
+        `📆 This Month:`,
+        `   Spent: ₹${monthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${monthPercent}%)`,
+        ``,
+        `📈 Last Month:`,
+        `   Spent: ₹${lastMonthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${lastMonthPercent}%)`
+      ];
+
+      // Build category-wise sections
+      const categoryLines = [];
+      for (const cat of categories) {
+        const budget = data.budgets[cat];
+        const dailyBudget = budget / 30;
+        const weeklyBudget = (budget * 7) / 30;
+
+        const catTodaySpent = activeExpenses
+          .filter((e) => e.category === cat && new Date(e.ts) >= todayStart)
+          .reduce((sum, e) => sum + e.amount, 0);
+        const catWeekSpent = activeExpenses
+          .filter((e) => e.category === cat && new Date(e.ts) >= weekStart)
+          .reduce((sum, e) => sum + e.amount, 0);
+        const catMonthSpent = activeExpenses
+          .filter((e) => e.category === cat && new Date(e.ts) >= monthStart)
+          .reduce((sum, e) => sum + e.amount, 0);
+        const catLastMonthSpent = activeExpenses
+          .filter((e) => {
+            const expDate = new Date(e.ts);
+            return e.category === cat && expDate >= lastMonthStart && expDate <= lastMonthEnd;
+          })
+          .reduce((sum, e) => sum + e.amount, 0);
+
+        const catTodayPercent = dailyBudget > 0 ? ((catTodaySpent / dailyBudget) * 100).toFixed(1) : 0;
+        const catWeekPercent = weeklyBudget > 0 ? ((catWeekSpent / weeklyBudget) * 100).toFixed(1) : 0;
+        const catMonthPercent = budget > 0 ? ((catMonthSpent / budget) * 100).toFixed(1) : 0;
+        const catLastMonthPercent = budget > 0 ? ((catLastMonthSpent / budget) * 100).toFixed(1) : 0;
+
+        categoryLines.push(
+          ``,
+          `📂 <b>${cat}</b>`,
+          `   Today: ₹${catTodaySpent.toFixed(0)} / ₹${dailyBudget.toFixed(0)} (${catTodayPercent}%)`,
+          `   Week: ₹${catWeekSpent.toFixed(0)} / ₹${weeklyBudget.toFixed(0)} (${catWeekPercent}%)`,
+          `   Month: ₹${catMonthSpent.toFixed(0)} / ₹${budget} (${catMonthPercent}%)`,
+          `   Last Month: ₹${catLastMonthSpent.toFixed(0)} / ₹${budget} (${catLastMonthPercent}%)`
+        );
+      }
+
+      const message = `💼 <b>Budget Breakdown</b>\n\n${overallLines.join("\n")}${categoryLines.join("\n")}`;
+      await sendMessage(chatId, message);
       return res.status(200).send("OK");
     }
 

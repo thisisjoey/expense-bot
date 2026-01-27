@@ -84,11 +84,12 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
   // For alerts/budgets: include ALL non-discarded expenses (both settled and unsettled)
   const activeExpenses = expenses.filter((e) => !e.discarded);
   
-  // Get date boundaries based on timeframe
-  const now = new Date();
-  const currentDay = now.getDate();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  // Get date boundaries based on timeframe - use IST
+  const nowUTC = new Date();
+  const nowIST = new Date(nowUTC.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const currentDay = nowIST.getDate();
+  const currentMonth = nowIST.getMonth();
+  const currentYear = nowIST.getFullYear();
   
   let startDate;
   let budgetMultiplier = 1; // For calculating period budget
@@ -99,7 +100,7 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
     budgetMultiplier = 1 / 30; // daily budget = monthly / 30
     periodName = "Today";
   } else if (timeframe === "weekly") {
-    const dayOfWeek = now.getDay();
+    const dayOfWeek = nowIST.getDay();
     const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     startDate = new Date(currentYear, currentMonth, currentDay - daysToMonday);
     budgetMultiplier = 7 / 30; // weekly budget = monthly * 7 / 30
@@ -700,17 +701,18 @@ function calculateBudgetProgress(category, budgets, expenses) {
   const dailyBudget = monthlyBudget / 30;
   const weeklyBudget = (monthlyBudget * 7) / 30;
 
-  // Get current date info
-  const nowDate = new Date();
-  const currentDay = nowDate.getDate();
-  const currentMonth = nowDate.getMonth();
-  const currentYear = nowDate.getFullYear();
+  // Get current date info - use IST
+  const nowUTC = new Date();
+  const nowIST = new Date(nowUTC.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const currentDay = nowIST.getDate();
+  const currentMonth = nowIST.getMonth();
+  const currentYear = nowIST.getFullYear();
 
   // Get start of today
   const startOfToday = new Date(currentYear, currentMonth, currentDay);
 
   // Get start of this week (Monday)
-  const dayOfWeek = nowDate.getDay();
+  const dayOfWeek = nowIST.getDay();
   const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
   const startOfWeek = new Date(
     currentYear,
@@ -1394,10 +1396,103 @@ Expense not found or already reverted.`
       return res.status(200).send("OK");
     }
 
+    /* ================= SEARCH EXPENSES ================= */
+    if (text.startsWith("/search ")) {
+      const query = text.substring(8).toLowerCase().trim();
+
+      if (!query) {
+        await sendMessage(
+          chatId,
+          `❌ <b>Usage:</b> /search &lt;term&gt;\n<i>Example: /search grocery</i>`
+        );
+        return res.status(200).send("OK");
+      }
+
+      const results = data.expenses.filter((e) => {
+        if (e.discarded) return false;
+        return (
+          e.category.toLowerCase().includes(query) ||
+          (e.comment && e.comment.toLowerCase().includes(query)) ||
+          e.amount.toString().includes(query) ||
+          e.userName.toLowerCase().includes(query)
+        );
+      });
+
+      if (!results.length) {
+        await sendMessage(chatId, `🔍 <b>No results for "${escapeHtml(query)}"</b>`);
+        return res.status(200).send("OK");
+      }
+
+      const lines = results.slice(0, 10).map((e) => {
+        const date = new Date(e.ts).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          timeZone: "Asia/Kolkata",
+        });
+        const name =
+          data.members.find((m) => m.userName === e.userName)?.displayName ||
+          e.userName;
+        const settled = e.settled ? "✓" : "";
+        return `${date} • ${escapeHtml(name)} • ₹${e.amount}\n   ${e.category} ${settled}`;
+      });
+      const header = `Date     │ User            │ Amount  │ Category`;
+      const divider = `${"─".repeat(60)}`;
+
+      const more =
+        results.length > 10 ? `\n\n<i>+${results.length - 10} more</i>` : "";
+      await sendMessage(
+        chatId,
+        `🔍 <b>Results (${results.length})</b>\n\n${lines.join("\n\n")}${more}`
+      );
+      return res.status(200).send("OK");
+    }
+
+    /* ================= LAST N EXPENSES ================= */
+    if (text.startsWith("/last")) {
+      const parts = text.split(" ");
+      const count = parseInt(parts[1]) || 10;
+
+      // Last shows ALL non-discarded expenses
+      const recent = data.expenses
+        .filter((e) => !e.discarded)
+        .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+        .slice(0, Math.min(count, 20));
+
+      if (!recent.length) {
+        await sendMessage(chatId, `📝 <b>No expenses yet</b>`);
+        return res.status(200).send("OK");
+      }
+
+      const lines = recent.map((e) => {
+        const date = new Date(e.ts).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Asia/Kolkata",
+        });
+        const name =
+          data.members.find((m) => m.userName === e.userName)?.displayName ||
+          e.userName;
+        const settled = e.settled ? "✓" : "";
+        return `${date} • ${escapeHtml(name)}\n   ₹${e.amount} - ${e.category} ${settled}`;
+      });
+      const header = `Date/Time       │ User            │ Amount  │ Category`;
+      const divider = `${"─".repeat(65)}`;
+
+      await sendMessage(
+        chatId,
+        `📝 <b>Last ${recent.length}</b>\n\n${lines.join("\n\n")}`
+      );
+      return res.status(200).send("OK");
+    }
+
     /* ================= EXPENSE PARSER ================= */
 
-    // Try to parse as expense
-    const parsedExpenses = parseExpense(text);
+    // Skip expense parsing if this is a command (starts with /)
+    if (!text.startsWith("/")) {
+      // Try to parse as expense
+      const parsedExpenses = parseExpense(text);
 
     if (parsedExpenses.length > 0) {
       const validExpenses = [];
@@ -1448,13 +1543,14 @@ Expense not found or already reverted.`
       const totalDailyBudget = totalMonthlyBudget / 30;
       const totalWeeklyBudget = (totalMonthlyBudget * 7) / 30;
 
-      const currentDate = new Date();
-      const currentDay = currentDate.getDate();
-      const currentMonth = currentDate.getMonth();
-      const currentYear = currentDate.getFullYear();
+      const currentUTC = new Date();
+      const currentIST = new Date(currentUTC.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const currentDay = currentIST.getDate();
+      const currentMonth = currentIST.getMonth();
+      const currentYear = currentIST.getFullYear();
       
       const todayStart = new Date(currentYear, currentMonth, currentDay);
-      const weekStart = new Date(currentYear, currentMonth, currentDay - (currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1));
+      const weekStart = new Date(currentYear, currentMonth, currentDay - (currentIST.getDay() === 0 ? 6 : currentIST.getDay() - 1));
       const monthStart = new Date(currentYear, currentMonth, 1);
 
       const todaySpent = updatedExpenses
@@ -1512,6 +1608,7 @@ Expense not found or already reverted.`
       await sendMessage(chatId, response, messageId);
       return res.status(200).send("OK");
     }
+    } // End of expense parsing (skip if command)
 
     /* ================= ADVANCED FEATURES ================= */
 
@@ -1598,9 +1695,10 @@ Expense not found or already reverted.`
 
     /* ================= MONTHLY REPORT ================= */
     if (text === "/monthly") {
-      const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
+      const nowUTC = new Date();
+      const nowIST = new Date(nowUTC.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const currentMonth = nowIST.getMonth();
+      const currentYear = nowIST.getFullYear();
 
       // Monthly report shows ALL non-discarded expenses
       const monthlyExpenses = data.expenses.filter((e) => {
@@ -1633,96 +1731,6 @@ Expense not found or already reverted.`
       await sendMessage(
         chatId,
         `📅 <b>${monthName} ${currentYear}</b>\n\n💰 Total: ₹${total.toFixed(2)}\n📝 Expenses: ${monthlyExpenses.length}\n\n${lines.join("\n\n")}`
-      );
-      return res.status(200).send("OK");
-    }
-
-    /* ================= SEARCH EXPENSES ================= */
-    if (text.startsWith("/search ")) {
-      const query = text.substring(8).toLowerCase().trim();
-
-      if (!query) {
-        await sendMessage(
-          chatId,
-          `❌ <b>Usage:</b> /search &lt;term&gt;\n<i>Example: /search grocery</i>`
-        );
-        return res.status(200).send("OK");
-      }
-
-      // Search shows ALL non-discarded expenses
-      const results = data.expenses.filter((e) => {
-        if (e.discarded) return false;
-        return (
-          e.category.toLowerCase().includes(query) ||
-          (e.comment && e.comment.toLowerCase().includes(query))
-        );
-      });
-
-      if (!results.length) {
-        await sendMessage(chatId, `🔍 <b>No results for "${escapeHtml(query)}"</b>`);
-        return res.status(200).send("OK");
-      }
-
-      const lines = results.slice(0, 10).map((e) => {
-        const date = new Date(e.ts).toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-          timeZone: "Asia/Kolkata",
-        });
-        const name =
-          data.members.find((m) => m.userName === e.userName)?.displayName ||
-          e.userName;
-        const settled = e.settled ? "✓" : "";
-        return `${date} • ${escapeHtml(name)} • ₹${e.amount}\n   ${e.category} ${settled}`;
-      });
-      const header = `Date     │ User            │ Amount  │ Category`;
-      const divider = `${"─".repeat(60)}`;
-
-      const more =
-        results.length > 10 ? `\n\n<i>+${results.length - 10} more</i>` : "";
-      await sendMessage(
-        chatId,
-        `🔍 <b>Results (${results.length})</b>\n\n${lines.join("\n\n")}${more}`
-      );
-      return res.status(200).send("OK");
-    }
-
-    /* ================= LAST N EXPENSES ================= */
-    if (text.startsWith("/last")) {
-      const parts = text.split(" ");
-      const count = parseInt(parts[1]) || 10;
-
-      // Last shows ALL non-discarded expenses
-      const recent = data.expenses
-        .filter((e) => !e.discarded)
-        .sort((a, b) => new Date(b.ts) - new Date(a.ts))
-        .slice(0, Math.min(count, 20));
-
-      if (!recent.length) {
-        await sendMessage(chatId, `📝 <b>No expenses yet</b>`);
-        return res.status(200).send("OK");
-      }
-
-      const lines = recent.map((e) => {
-        const date = new Date(e.ts).toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-          hour: "2-digit",
-          minute: "2-digit",
-          timeZone: "Asia/Kolkata",
-        });
-        const name =
-          data.members.find((m) => m.userName === e.userName)?.displayName ||
-          e.userName;
-        const settled = e.settled ? "✓" : "";
-        return `${date} • ${escapeHtml(name)}\n   ₹${e.amount} - ${e.category} ${settled}`;
-      });
-      const header = `Date/Time       │ User            │ Amount  │ Category`;
-      const divider = `${"─".repeat(65)}`;
-
-      await sendMessage(
-        chatId,
-        `📝 <b>Last ${recent.length}</b>\n\n${lines.join("\n\n")}`
       );
       return res.status(200).send("OK");
     }
@@ -1762,14 +1770,15 @@ Expense not found or already reverted.`
       }
 
       const activeExpenses = data.expenses.filter((e) => !e.discarded);
-      const currentDate = new Date();
-      const currentDay = currentDate.getDate();
-      const currentMonth = currentDate.getMonth();
-      const currentYear = currentDate.getFullYear();
+      const currentUTC = new Date();
+      const currentIST = new Date(currentUTC.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+      const currentDay = currentIST.getDate();
+      const currentMonth = currentIST.getMonth();
+      const currentYear = currentIST.getFullYear();
 
       // Date boundaries for current period
       const todayStart = new Date(currentYear, currentMonth, currentDay);
-      const weekStart = new Date(currentYear, currentMonth, currentDay - (currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1));
+      const weekStart = new Date(currentYear, currentMonth, currentDay - (currentIST.getDay() === 0 ? 6 : currentIST.getDay() - 1));
       const monthStart = new Date(currentYear, currentMonth, 1);
 
       // Date boundaries for last month

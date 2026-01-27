@@ -141,31 +141,20 @@ async function loadBudgets() {
 }
 
 async function saveBudgets(budgets) {
-  // Delete all existing budgets
-  const { error: deleteError } = await supabase
-    .from("budgets")
-    .delete()
-    .neq("category", "");
-
-  if (deleteError) {
-    console.error("Error deleting budgets:", deleteError);
-    throw deleteError;
-  }
-
-  // Insert new budgets
+  // Use UPSERT to update existing or insert new budgets
   const rows = Object.entries(budgets).map(([category, budget]) => ({
     category,
     budget,
   }));
 
   if (rows.length) {
-    const { error: insertError } = await supabase
+    const { error } = await supabase
       .from("budgets")
-      .insert(rows);
+      .upsert(rows, { onConflict: "category" });
 
-    if (insertError) {
-      console.error("Error inserting budgets:", insertError);
-      throw insertError;
+    if (error) {
+      console.error("Error upserting budgets:", error);
+      throw error;
     }
   }
 }
@@ -744,24 +733,40 @@ Use /categories to see available categories.`
         return res.status(200).send("OK");
       }
 
-      // Check if category has expenses
-      const hasExpenses = data.expenses.some(
-        (e) => e.category === cat && !e.discarded
-      );
+      // Check if category has expenses (including discarded ones due to FK constraint)
+      const hasExpenses = data.expenses.some((e) => e.category === cat);
 
       if (hasExpenses) {
         await sendMessage(
           chatId,
           `⚠️ <b>Cannot delete</b>
 
-"${cat}" has active expenses.
-Delete or archive those expenses first.`
+"${cat}" has expenses (active or archived).
+Foreign key constraint prevents deletion.
+
+To delete this category:
+1. First delete all its expenses using /clearall
+2. Then try deleting the category again`
         );
         return res.status(200).send("OK");
       }
 
-      delete data.budgets[cat];
-      await saveBudgets(data.budgets);
+      // Delete from database directly
+      const { error } = await supabase
+        .from("budgets")
+        .delete()
+        .eq("category", cat);
+
+      if (error) {
+        console.error("Error deleting category:", error);
+        await sendMessage(
+          chatId,
+          `❌ <b>Error</b>
+
+Failed to delete category: ${error.message}`
+        );
+        return res.status(200).send("OK");
+      }
 
       await sendMessage(chatId, `🗑️ <b>Deleted</b>\n\n${cat} has been removed.`);
       return res.status(200).send("OK");

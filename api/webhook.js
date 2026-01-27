@@ -152,9 +152,7 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
 
     tableData.push([
       status,
-      cat.substring(0, 12), // Limit category name length
-      `₹${spent.toFixed(0)}`,
-      `₹${periodBudget.toFixed(0)}`,
+      cat.substring(0, 10),
       `${percent.toFixed(0)}%`,
       `₹${remaining.toFixed(0)}`
     ]);
@@ -162,13 +160,13 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
 
   // Sort by percentage descending
   tableData.sort((a, b) => {
-    const aPercent = parseFloat(a[4]);
-    const bPercent = parseFloat(b[4]);
+    const aPercent = parseFloat(a[2]);
+    const bPercent = parseFloat(b[2]);
     return bPercent - aPercent;
   });
 
   const table = createTable(
-    ['', 'Category', 'Spent', 'Budget', '%', 'Left'],
+    ['', 'Category', 'Used', 'Left'],
     tableData
   );
 
@@ -1123,16 +1121,14 @@ Use /addcategory to create categories first.`
         const status = remaining >= 0 ? "✅" : "⚠️";
         tableRows.push([
           status,
-          cat.substring(0, 12),
-          `₹${spent.toFixed(0)}`,
-          `₹${budget}`,
+          cat.substring(0, 10),
           `${percent}%`,
           `₹${remaining.toFixed(0)}`
         ]);
       }
 
       const table = createTable(
-        ['', 'Category', 'Spent', 'Budget', '%', 'Left'],
+        ['', 'Category', 'Used', 'Left'],
         tableRows
       );
 
@@ -1406,13 +1402,30 @@ Expense not found or already reverted.`
 
       await saveExpenses(newExpenses);
 
-      const budgetLines = [];
       const uniqueCategories = [
         ...new Set(validExpenses.map((e) => e.category)),
       ];
 
       const updatedExpenses = await loadExpenses();
 
+      // Calculate total monthly budget and spent across all categories
+      const totalMonthlyBudget = Object.values(data.budgets).reduce((sum, b) => sum + b, 0);
+      const nowDate = new Date();
+      const startOfMonth = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+      const totalMonthlySpent = updatedExpenses
+        .filter((e) => !e.discarded && new Date(e.ts) >= startOfMonth)
+        .reduce((sum, e) => sum + e.amount, 0);
+      const totalMonthlyPercent = totalMonthlyBudget > 0 
+        ? ((totalMonthlySpent / totalMonthlyBudget) * 100).toFixed(0) 
+        : 0;
+
+      const lines = validExpenses.map(
+        (exp) => `₹${exp.amount} - ${exp.category}`
+      );
+
+      let response = `✅ <b>${lines.join("\n")}</b>\n\n`;
+
+      // Show category-specific progress
       for (const category of uniqueCategories) {
         const progress = calculateBudgetProgress(
           category,
@@ -1420,23 +1433,22 @@ Expense not found or already reverted.`
           updatedExpenses
         );
 
-        budgetLines.push(
-          `<b>${category}:</b>`,
-          `Today: ₹${progress.spentToday.toFixed(0)}/₹${progress.dailyBudget.toFixed(0)} (${progress.dailyPercent}%)`,
-          `Week: ₹${progress.spentThisWeek.toFixed(0)}/₹${progress.weeklyBudget.toFixed(0)} (${progress.weeklyPercent}%)`,
-          `Month: ₹${progress.spentThisMonth.toFixed(0)}/₹${progress.monthlyBudget.toFixed(0)} (${progress.monthlyPercent}%)`
-        );
+        const tableRows = [
+          ['Today', `₹${progress.spentToday.toFixed(0)}`, `₹${progress.dailyBudget.toFixed(0)}`, `${progress.dailyPercent}%`],
+          ['Week', `₹${progress.spentThisWeek.toFixed(0)}`, `₹${progress.weeklyBudget.toFixed(0)}`, `${progress.weeklyPercent}%`],
+          ['Month', `₹${progress.spentThisMonth.toFixed(0)}`, `₹${progress.monthlyBudget.toFixed(0)}`, `${progress.monthlyPercent}%`]
+        ];
+
+        const table = createTable(['', 'Spent', 'Budget', '%'], tableRows);
+        response += `<b>${category}</b>\n${table}\n\n`;
       }
 
-      const lines = validExpenses.map(
-        (exp) => `₹${exp.amount} - ${exp.category}`
-      );
-
-      let response = `✅ <b>${lines.join("\n")}</b>`;
-
-      if (budgetLines.length > 0) {
-        response += `\n\n${budgetLines.join("\n")}`;
-      }
+      // Show overall progress
+      const overallTableRows = [
+        ['Month', `₹${totalMonthlySpent.toFixed(0)}`, `₹${totalMonthlyBudget.toFixed(0)}`, `${totalMonthlyPercent}%`]
+      ];
+      const overallTable = createTable(['', 'Spent', 'Budget', '%'], overallTableRows);
+      response += `<b>Overall</b>\n${overallTable}`;
 
       await sendMessage(chatId, response, messageId);
       return res.status(200).send("OK");

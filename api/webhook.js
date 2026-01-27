@@ -53,71 +53,32 @@ function formatDate(ts) {
 /* ================= FAST COMMANDS (NO DB) ================= */
 
 async function handleFastCommands(text, chatId) {
-  if (text !== "/commands") return false;
+  if (text !== "/start" && text !== "/help") return false;
 
   await sendMessage(
     chatId,
-    `📘 Expense Bot Commands Guide
+    `💰 Expense Tracker
 
-🧾 Add Expenses
-Format: <number>-<category>
-Free text allowed. Bot understands context.
+Add: 90-grocery or 90 grocery
+Multi: 50+30-ai or 100-grocery,ai
 
-Examples:
-- 90-grocery
-- random text 90 grocery
-- 90+10 - grocery
-- 90+10 - grocery, ai
+Basic:
+/categories /summary /owe /settled
 
-📂 View Categories
-/categories
-Shows all categories and budgets
+Advanced:
+/stats - overview
+/monthly - this month
+/topspenders - leaderboard
+/last 10 - recent expenses
+/search <term> - find expenses
+/alerts - budget warnings
+/clearall - delete all
 
-➕ Add Category
-/addcategory <n> <budget>
-Example: /addcategory travel 2000
-
-✏️ Update Budget
-/setbudget <n> <budget>
-Example: /setbudget grocery 300
-
-🗑️ Delete Category
-/deletecategory <n>
-Example: /deletecategory ai
-
-📊 Budget Summary
-/summary
-Shows spending vs budget for each category
-
-👥 Manage Members
-/members
-Show all registered members
-
-/addmember <name>
-Add a member to expense split
-Example: /addmember John
-
-/removemember <name>
-Remove a member from split
-Example: /removemember John
-
-💸 Who Owes Whom
-/owe
-Shows payment breakdown for equal split
-
-✅ Settle Expenses
-/settled
-Mark yourself as settled
-When everyone settles → ledger resets
-
-♻️ Revert (Undo)
-Reply to an expense message and type:
-/revert
-Removes that expense from records
-
-ℹ️ Help
-/commands
-Shows this guide`
+Manage:
+/addcategory travel 5000
+/setbudget grocery 300
+/addmember John
+/revert - reply to expense`
   );
 
   return true;
@@ -433,18 +394,13 @@ export default async function handler(req, res) {
       if (!categories.length) {
         await sendMessage(
           chatId,
-          `📂 No Categories
-
-Use /addcategory to create one.`
+          `❌ No categories yet. Add one with:\n/addcategory name budget`
         );
         return res.status(200).send("OK");
       }
 
       const lines = categories.map(([cat, budget]) => `${cat}: ₹${budget}`);
-      await sendMessage(
-        chatId,
-        `📂 Categories & Budgets\n\n${lines.join("\n")}`
-      );
+      await sendMessage(chatId, `📂 Categories\n\n${lines.join("\n")}`);
       return res.status(200).send("OK");
     }
 
@@ -455,7 +411,7 @@ Use /addcategory to create one.`
       if (parts.length < 3) {
         await sendMessage(
           chatId,
-          `❌ Invalid Format
+          `❌ Usage
 
 Usage: /addcategory <name> <budget>
 Example: /addcategory travel 2000`
@@ -467,7 +423,7 @@ Example: /addcategory travel 2000`
       if (data.budgets[cat]) {
         await sendMessage(
           chatId,
-          `❌ Category Exists
+          `❌ Already exists
 
 "${cat}" already exists with budget ₹${data.budgets[cat]}.
 Use /setbudget to update it.`
@@ -480,7 +436,7 @@ Use /setbudget to update it.`
 
       await sendMessage(
         chatId,
-        `✅ Category Created
+        `✅ Added
 
 ${cat}: ₹${budget}`
       );
@@ -494,7 +450,7 @@ ${cat}: ₹${budget}`
       if (parts.length < 3) {
         await sendMessage(
           chatId,
-          `❌ Invalid Format
+          `❌ Usage
 
 Usage: /setbudget <name> <budget>
 Example: /setbudget grocery 300`
@@ -506,7 +462,7 @@ Example: /setbudget grocery 300`
       if (!data.budgets[cat]) {
         await sendMessage(
           chatId,
-          `❌ Category Not Found
+          `❌ Not found
 
 "${cat}" doesn't exist.
 Use /categories to see available categories.`
@@ -535,7 +491,7 @@ ${cat}
       if (parts.length < 2) {
         await sendMessage(
           chatId,
-          `❌ Invalid Format
+          `❌ Usage
 
 Usage: /deletecategory <name>
 Example: /deletecategory ai`
@@ -547,7 +503,7 @@ Example: /deletecategory ai`
       if (!data.budgets[cat]) {
         await sendMessage(
           chatId,
-          `❌ Category Not Found
+          `❌ Not found
 
 "${cat}" doesn't exist.
 Use /categories to see available categories.`
@@ -560,7 +516,7 @@ Use /categories to see available categories.`
 
       await sendMessage(
         chatId,
-        `🗑️ Category Deleted
+        `🗑️ Deleted
 
 ${cat} has been removed.`
       );
@@ -599,7 +555,7 @@ Members are added automatically when they interact with the bot.`
       if (parts.length < 2) {
         await sendMessage(
           chatId,
-          `❌ Invalid Format
+          `❌ Usage
 
 Usage: /addmember <name>
 Example: /addmember John`
@@ -613,7 +569,7 @@ Example: /addmember John`
       if (data.members.some((m) => m.userName === newUserName)) {
         await sendMessage(
           chatId,
-          `❌ Member Exists
+          `❌ Already added
 
 "${name}" is already registered.`
         );
@@ -642,7 +598,7 @@ Example: /addmember John`
 
       await sendMessage(
         chatId,
-        `✅ Member Added
+        `✅ Added
 
 ${name} has been added to the group.`
       );
@@ -656,7 +612,7 @@ ${name} has been added to the group.`
       if (parts.length < 2) {
         await sendMessage(
           chatId,
-          `❌ Invalid Format
+          `❌ Usage
 
 Usage: /removemember <name>
 Example: /removemember John`
@@ -671,7 +627,7 @@ Example: /removemember John`
       if (!member) {
         await sendMessage(
           chatId,
-          `❌ Member Not Found
+          `❌ Not found
 
 "${name}" is not registered.
 Use /members to see all members.`
@@ -683,7 +639,7 @@ Use /members to see all members.`
 
       await sendMessage(
         chatId,
-        `🗑️ Member Removed
+        `🗑️ Removed
 
 ${name} has been removed from the group.
 All their expenses will also be deleted.`
@@ -718,13 +674,13 @@ Use /addcategory to create categories first.`
 
         const status = remaining >= 0 ? "✅" : "⚠️";
         lines.push(
-          `${status} ${cat}\n   Spent: ₹${spent} / ₹${budget} (${percent}%)\n   Remaining: ₹${remaining}`
+          `${status} ${cat}: ₹${spent}/₹${budget} (${percent}%) • Left: ₹${remaining}`
         );
       }
 
       await sendMessage(
         chatId,
-        `📊 Budget Summary\n\n${lines.join("\n\n")}`
+        `📊 Summary\n\n${lines.join("\n")}`
       );
       return res.status(200).send("OK");
     }
@@ -794,9 +750,7 @@ No expenses recorded yet.`
           chatId,
           `💸 All Settled!
 
-Everyone has paid their fair share.
-Total spent: ₹${totalSpent.toFixed(2)}
-Per person: ₹${perPerson.toFixed(2)}`
+Total: ₹${totalSpent.toFixed(2)} • Per person: ₹${perPerson.toFixed(2)}`
         );
         return res.status(200).send("OK");
       }
@@ -832,14 +786,12 @@ Per person: ₹${perPerson.toFixed(2)}`
       }
 
       const lines = [
-        `Total spent: ₹${totalSpent.toFixed(2)}`,
-        `Per person: ₹${perPerson.toFixed(2)}`,
+        `Total: ₹${totalSpent.toFixed(2)} • Per person: ₹${perPerson.toFixed(2)}`,
         "",
-        "💰 Settlement Plan:",
         ...settlements,
       ];
 
-      await sendMessage(chatId, `💸 Who Owes Whom\n\n${lines.join("\n")}`);
+      await sendMessage(chatId, `💸 Settlements\n\n${lines.join("\n")}`);
       return res.status(200).send("OK");
     }
 
@@ -896,11 +848,11 @@ Last settled: ${formatDate(userSettlement.lastSettledDate)}`
           chatId,
           `🎉 All Settled!
 
-Everyone has marked themselves as settled.
-The ledger has been reset.
+All settled!
+Ledger reset.
 
-Previous expenses have been archived.
-Start fresh with new expenses!`
+Previous expenses archived.
+Start fresh!`
         );
       } else {
         const settledCount = updatedSettlements.filter((s) => s.settled).length;
@@ -910,7 +862,7 @@ Start fresh with new expenses!`
           chatId,
           `✅ Marked as Settled
 
-You've been marked as settled.
+Marked as settled
 
 Status: ${settledCount}/${totalCount} members settled
 Waiting for others to settle...`
@@ -944,7 +896,7 @@ Reply to an expense message and type /revert to undo it.`
           chatId,
           `❌ Expense Not Found
 
-Could not find an active expense for that message.
+Expense not found or already reverted.
 It may have already been reverted.`
         );
         return res.status(200).send("OK");
@@ -958,7 +910,7 @@ It may have already been reverted.`
         `♻️ Expense Reverted
 
 ₹${expense.amount} - ${expense.category}
-has been removed from records.`,
+removed`,
         messageId
       );
       return res.status(200).send("OK");
@@ -1002,18 +954,313 @@ has been removed from records.`,
 
       await saveExpenses(newExpenses);
 
+      // Calculate budget progress for each category
+      const budgetLines = [];
+      const uniqueCategories = [...new Set(validExpenses.map(e => e.category))];
+      
+      for (const category of uniqueCategories) {
+        const monthlyBudget = data.budgets[category];
+        const dailyBudget = monthlyBudget / 30;
+        const weeklyBudget = (monthlyBudget * 7) / 30;
+
+        // Get current date info
+        const nowDate = new Date();
+        const currentDay = nowDate.getDate();
+        const currentMonth = nowDate.getMonth();
+        const currentYear = nowDate.getFullYear();
+        
+        // Get start of today
+        const startOfToday = new Date(currentYear, currentMonth, currentDay);
+        
+        // Get start of this week (Monday)
+        const dayOfWeek = nowDate.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const startOfWeek = new Date(currentYear, currentMonth, currentDay - daysToMonday);
+        
+        // Get start of this month
+        const startOfMonth = new Date(currentYear, currentMonth, 1);
+
+        // Filter expenses by category and time period
+        const categoryExpenses = data.expenses.filter(e => 
+          e.category === category && !e.discarded
+        );
+
+        // Calculate spent amounts
+        const spentToday = categoryExpenses
+          .filter(e => new Date(e.ts) >= startOfToday)
+          .reduce((sum, e) => sum + e.amount, 0);
+
+        const spentThisWeek = categoryExpenses
+          .filter(e => new Date(e.ts) >= startOfWeek)
+          .reduce((sum, e) => sum + e.amount, 0);
+
+        const spentThisMonth = categoryExpenses
+          .filter(e => new Date(e.ts) >= startOfMonth)
+          .reduce((sum, e) => sum + e.amount, 0);
+
+        // Calculate percentages
+        const dailyPercent = ((spentToday / dailyBudget) * 100).toFixed(0);
+        const weeklyPercent = ((spentThisWeek / weeklyBudget) * 100).toFixed(0);
+        const monthlyPercent = ((spentThisMonth / monthlyBudget) * 100).toFixed(0);
+
+        // Format amounts
+        const todayStr = `₹${spentToday.toFixed(0)}/₹${dailyBudget.toFixed(0)}`;
+        const weekStr = `₹${spentThisWeek.toFixed(0)}/₹${weeklyBudget.toFixed(0)}`;
+        const monthStr = `₹${spentThisMonth.toFixed(0)}/₹${monthlyBudget.toFixed(0)}`;
+
+        budgetLines.push(
+          `${category}:`,
+          `Today: ${todayStr} (${dailyPercent}%)`,
+          `Week: ${weekStr} (${weeklyPercent}%)`,
+          `Month: ${monthStr} (${monthlyPercent}%)`
+        );
+      }
+
       // Send confirmation
       const lines = validExpenses.map(
         (exp) => `₹${exp.amount} - ${exp.category}`
       );
 
-      let response = `✅ Expense${validExpenses.length > 1 ? "s" : ""} Added\n\n${lines.join("\n")}`;
+      let response = `✅ ${lines.join("\n")}`;
+      
+      if (budgetLines.length > 0) {
+        response += `\n\n${budgetLines.join("\n")}`;
+      }
 
       if (errors.length > 0) {
         response += "\n\n" + errors.join("\n\n");
       }
 
       await sendMessage(chatId, response, messageId);
+      return res.status(200).send("OK");
+    }
+
+    /* ================= ADVANCED FEATURES ================= */
+
+    /* ================= STATS COMMAND ================= */
+    if (text === "/stats") {
+      const activeExpenses = data.expenses.filter((e) => !e.discarded);
+      
+      if (!activeExpenses.length) {
+        await sendMessage(chatId, `📊 No expenses yet`);
+        return res.status(200).send("OK");
+      }
+
+      const total = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const avgPerExpense = total / activeExpenses.length;
+      
+      // Group by user
+      const byUser = {};
+      activeExpenses.forEach((e) => {
+        if (!byUser[e.userName]) byUser[e.userName] = 0;
+        byUser[e.userName] += e.amount;
+      });
+
+      // Top spender
+      const topSpender = Object.entries(byUser).sort((a, b) => b[1] - a[1])[0];
+      const topSpenderName = data.members.find(m => m.userName === topSpender[0])?.displayName || topSpender[0];
+
+      // Group by category
+      const byCategory = {};
+      activeExpenses.forEach((e) => {
+        if (!byCategory[e.category]) byCategory[e.category] = 0;
+        byCategory[e.category] += e.amount;
+      });
+
+      const topCategory = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0];
+
+      await sendMessage(
+        chatId,
+        `📊 Stats
+
+Total: ₹${total.toFixed(2)}
+Expenses: ${activeExpenses.length}
+Avg: ₹${avgPerExpense.toFixed(2)}
+
+Top spender: ${topSpenderName} (₹${topSpender[1]})
+Top category: ${topCategory[0]} (₹${topCategory[1]})`
+      );
+      return res.status(200).send("OK");
+    }
+
+    /* ================= TOP SPENDERS ================= */
+    if (text === "/topspenders") {
+      const activeExpenses = data.expenses.filter((e) => !e.discarded);
+      
+      if (!activeExpenses.length) {
+        await sendMessage(chatId, `🏆 No expenses yet`);
+        return res.status(200).send("OK");
+      }
+
+      const byUser = {};
+      activeExpenses.forEach((e) => {
+        if (!byUser[e.userName]) byUser[e.userName] = 0;
+        byUser[e.userName] += e.amount;
+      });
+
+      const sorted = Object.entries(byUser)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+      const lines = sorted.map(([userName, amount], idx) => {
+        const name = data.members.find(m => m.userName === userName)?.displayName || userName;
+        const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : "  ";
+        return `${medal} ${name}: ₹${amount.toFixed(2)}`;
+      });
+
+      await sendMessage(chatId, `🏆 Top Spenders\n\n${lines.join("\n")}`);
+      return res.status(200).send("OK");
+    }
+
+    /* ================= MONTHLY REPORT ================= */
+    if (text === "/monthly") {
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+
+      const monthlyExpenses = data.expenses.filter((e) => {
+        if (e.discarded) return false;
+        const expenseDate = new Date(e.ts);
+        return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+      });
+
+      if (!monthlyExpenses.length) {
+        await sendMessage(chatId, `📅 No expenses this month`);
+        return res.status(200).send("OK");
+      }
+
+      const total = monthlyExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const byCategory = {};
+      
+      monthlyExpenses.forEach((e) => {
+        if (!byCategory[e.category]) byCategory[e.category] = 0;
+        byCategory[e.category] += e.amount;
+      });
+
+      const monthName = now.toLocaleString('default', { month: 'long' });
+      const lines = Object.entries(byCategory)
+        .sort((a, b) => b[1] - a[1])
+        .map(([cat, amount]) => `${cat}: ₹${amount.toFixed(2)}`);
+
+      await sendMessage(
+        chatId,
+        `📅 ${monthName} ${currentYear}
+
+Total: ₹${total.toFixed(2)}
+Expenses: ${monthlyExpenses.length}
+
+${lines.join("\n")}`
+      );
+      return res.status(200).send("OK");
+    }
+
+    /* ================= SEARCH EXPENSES ================= */
+    if (text.startsWith("/search ")) {
+      const query = text.substring(8).toLowerCase().trim();
+      
+      if (!query) {
+        await sendMessage(chatId, `❌ Usage: /search <term>\nExample: /search grocery`);
+        return res.status(200).send("OK");
+      }
+
+      const results = data.expenses.filter((e) => {
+        if (e.discarded) return false;
+        return e.category.toLowerCase().includes(query) || 
+               (e.comment && e.comment.toLowerCase().includes(query));
+      });
+
+      if (!results.length) {
+        await sendMessage(chatId, `🔍 No results for "${query}"`);
+        return res.status(200).send("OK");
+      }
+
+      const lines = results.slice(0, 10).map((e) => {
+        const date = new Date(e.ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        const name = data.members.find(m => m.userName === e.userName)?.displayName || e.userName;
+        return `${date} • ${name} • ₹${e.amount} - ${e.category}`;
+      });
+
+      const more = results.length > 10 ? `\n\n+${results.length - 10} more` : "";
+      await sendMessage(chatId, `🔍 Results (${results.length})\n\n${lines.join("\n")}${more}`);
+      return res.status(200).send("OK");
+    }
+
+    /* ================= LAST N EXPENSES ================= */
+    if (text.startsWith("/last")) {
+      const parts = text.split(" ");
+      const count = parseInt(parts[1]) || 10;
+      
+      const recent = data.expenses
+        .filter((e) => !e.discarded)
+        .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+        .slice(0, Math.min(count, 20));
+
+      if (!recent.length) {
+        await sendMessage(chatId, `📝 No expenses yet`);
+        return res.status(200).send("OK");
+      }
+
+      const lines = recent.map((e) => {
+        const date = new Date(e.ts).toLocaleDateString('en-IN', { 
+          day: 'numeric', 
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        const name = data.members.find(m => m.userName === e.userName)?.displayName || e.userName;
+        return `${date} • ${name}\n₹${e.amount} - ${e.category}`;
+      });
+
+      await sendMessage(chatId, `📝 Last ${recent.length}\n\n${lines.join("\n\n")}`);
+      return res.status(200).send("OK");
+    }
+
+    /* ================= DELETE ALL EXPENSES (ADMIN) ================= */
+    if (text === "/clearall") {
+      const activeCount = data.expenses.filter((e) => !e.discarded).length;
+      
+      if (activeCount === 0) {
+        await sendMessage(chatId, `🗑️ No active expenses`);
+        return res.status(200).send("OK");
+      }
+
+      // Mark all as discarded
+      for (const expense of data.expenses) {
+        if (!expense.discarded) {
+          await updateExpense(expense.id, { discarded: true });
+        }
+      }
+
+      await sendMessage(chatId, `🗑️ Cleared ${activeCount} expenses`);
+      return res.status(200).send("OK");
+    }
+
+    /* ================= BUDGET ALERTS ================= */
+    if (text === "/alerts") {
+      const categories = Object.keys(data.budgets);
+      const activeExpenses = data.expenses.filter((e) => !e.discarded);
+      const alerts = [];
+
+      for (const cat of categories) {
+        const spent = activeExpenses
+          .filter((e) => e.category === cat)
+          .reduce((sum, e) => sum + e.amount, 0);
+        const budget = data.budgets[cat];
+        const percent = (spent / budget) * 100;
+
+        if (percent >= 90) {
+          alerts.push(`⚠️ ${cat}: ${percent.toFixed(0)}% (₹${spent}/₹${budget})`);
+        } else if (percent >= 75) {
+          alerts.push(`⚡ ${cat}: ${percent.toFixed(0)}% (₹${spent}/₹${budget})`);
+        }
+      }
+
+      if (!alerts.length) {
+        await sendMessage(chatId, `✅ All budgets healthy`);
+        return res.status(200).send("OK");
+      }
+
+      await sendMessage(chatId, `⚠️ Budget Alerts\n\n${alerts.join("\n")}`);
       return res.status(200).send("OK");
     }
 

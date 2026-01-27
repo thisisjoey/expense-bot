@@ -1818,6 +1818,11 @@ Expense not found or already reverted.`
         `📆 This Month:`,
         `   Spent: ₹${monthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${monthPercent}%)`,
         ``,
+        `${"─".repeat(40)}`,
+        ``,
+        ``,
+        ``,
+        ``,
         `📈 Last Month (Planned vs Consumed):`,
         `   ₹${lastMonthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${lastMonthPercent}%)`
       ];
@@ -1856,7 +1861,9 @@ Expense not found or already reverted.`
           `   Today: ₹${catTodaySpent.toFixed(0)} / ₹${dailyBudget.toFixed(0)} (${catTodayPercent}%)`,
           `   Week: ₹${catWeekSpent.toFixed(0)} / ₹${weeklyBudget.toFixed(0)} (${catWeekPercent}%)`,
           `   Month: ₹${catMonthSpent.toFixed(0)} / ₹${budget} (${catMonthPercent}%)`,
-          `   Last Month (Planned vs Consumed): ₹${catLastMonthSpent.toFixed(0)} / ₹${budget} (${catLastMonthPercent}%)`
+          ``,
+          `   <b>Last Month (Planned vs Consumed):</b>`,
+          `   ₹${catLastMonthSpent.toFixed(0)} / ₹${budget} (${catLastMonthPercent}%)`
         );
       }
 

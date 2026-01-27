@@ -384,17 +384,19 @@ function parseExpense(text) {
 
 /* ================= MAIN WEBHOOK HANDLER ================= */
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   try {
+    // Handle Vercel's serverless function format
     if (req.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
+      return res.status(405).send("Method not allowed");
     }
 
-    const update = await req.json();
-    const message = update.message;
+    // Vercel automatically parses JSON into req.body
+    const update = req.body;
+    const message = update?.message;
 
     if (!message || !message.text) {
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     const chatId = message.chat.id;
@@ -413,7 +415,7 @@ export default async function handler(req) {
 
     // Handle fast commands (no DB load needed)
     if (await handleFastCommands(text, chatId)) {
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     // Load all data for other commands
@@ -435,7 +437,7 @@ export default async function handler(req) {
 
 Use /addcategory to create one.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const lines = categories.map(([cat, budget]) => `${cat}: ₹${budget}`);
@@ -443,7 +445,7 @@ Use /addcategory to create one.`
         chatId,
         `📂 Categories & Budgets\n\n${lines.join("\n")}`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= ADD CATEGORY ================= */
@@ -458,7 +460,7 @@ Use /addcategory to create one.`
 Usage: /addcategory <name> <budget>
 Example: /addcategory travel 2000`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const [, cat, budget] = parts;
@@ -470,7 +472,7 @@ Example: /addcategory travel 2000`
 "${cat}" already exists with budget ₹${data.budgets[cat]}.
 Use /setbudget to update it.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       data.budgets[cat] = Number(budget);
@@ -482,7 +484,7 @@ Use /setbudget to update it.`
 
 ${cat}: ₹${budget}`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= SET BUDGET ================= */
@@ -497,7 +499,7 @@ ${cat}: ₹${budget}`
 Usage: /setbudget <name> <budget>
 Example: /setbudget grocery 300`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const [, cat, budget] = parts;
@@ -509,7 +511,7 @@ Example: /setbudget grocery 300`
 "${cat}" doesn't exist.
 Use /categories to see available categories.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const oldBudget = data.budgets[cat];
@@ -523,7 +525,7 @@ Use /categories to see available categories.`
 ${cat}
 ₹${oldBudget} → ₹${budget}`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= DELETE CATEGORY ================= */
@@ -538,7 +540,7 @@ ${cat}
 Usage: /deletecategory <name>
 Example: /deletecategory ai`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const cat = parts[1];
@@ -550,7 +552,7 @@ Example: /deletecategory ai`
 "${cat}" doesn't exist.
 Use /categories to see available categories.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       delete data.budgets[cat];
@@ -562,7 +564,7 @@ Use /categories to see available categories.`
 
 ${cat} has been removed.`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= MEMBERS COMMAND ================= */
@@ -575,7 +577,7 @@ ${cat} has been removed.`
 
 Members are added automatically when they interact with the bot.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const lines = data.members.map((m) => {
@@ -587,7 +589,7 @@ Members are added automatically when they interact with the bot.`
         chatId,
         `👥 Registered Members\n\n${lines.join("\n")}\n\nTotal: ${data.members.length}`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= ADD MEMBER ================= */
@@ -602,7 +604,7 @@ Members are added automatically when they interact with the bot.`
 Usage: /addmember <name>
 Example: /addmember John`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const name = parts.slice(1).join(" ");
@@ -615,7 +617,7 @@ Example: /addmember John`
 
 "${name}" is already registered.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       // Create member without telegram_user_id (manual addition)
@@ -644,7 +646,7 @@ Example: /addmember John`
 
 ${name} has been added to the group.`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= REMOVE MEMBER ================= */
@@ -659,7 +661,7 @@ ${name} has been added to the group.`
 Usage: /removemember <name>
 Example: /removemember John`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const name = parts.slice(1).join(" ");
@@ -674,7 +676,7 @@ Example: /removemember John`
 "${name}" is not registered.
 Use /members to see all members.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       await deleteMember(targetUserName);
@@ -686,7 +688,7 @@ Use /members to see all members.`
 ${name} has been removed from the group.
 All their expenses will also be deleted.`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= SUMMARY COMMAND ================= */
@@ -700,7 +702,7 @@ All their expenses will also be deleted.`
 
 Use /addcategory to create categories first.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const activeExpenses = data.expenses.filter((e) => !e.discarded);
@@ -724,7 +726,7 @@ Use /addcategory to create categories first.`
         chatId,
         `📊 Budget Summary\n\n${lines.join("\n\n")}`
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= OWE COMMAND ================= */
@@ -737,7 +739,7 @@ Use /addcategory to create categories first.`
 
 No members registered yet.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const activeExpenses = data.expenses.filter((e) => !e.discarded);
@@ -748,7 +750,7 @@ No members registered yet.`
 
 No expenses recorded yet.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       // Calculate total spent by each user
@@ -796,7 +798,7 @@ Everyone has paid their fair share.
 Total spent: ₹${totalSpent.toFixed(2)}
 Per person: ₹${perPerson.toFixed(2)}`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       // Calculate settlements
@@ -838,7 +840,7 @@ Per person: ₹${perPerson.toFixed(2)}`
       ];
 
       await sendMessage(chatId, `💸 Who Owes Whom\n\n${lines.join("\n")}`);
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= SETTLED COMMAND ================= */
@@ -855,7 +857,7 @@ Per person: ₹${perPerson.toFixed(2)}`
 
 Could not find your settlement record.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       if (userSettlement.settled) {
@@ -866,7 +868,7 @@ Could not find your settlement record.`
 You're already marked as settled.
 Last settled: ${formatDate(userSettlement.lastSettledDate)}`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       // Mark user as settled
@@ -915,7 +917,7 @@ Waiting for others to settle...`
         );
       }
 
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= REVERT COMMAND ================= */
@@ -929,7 +931,7 @@ Waiting for others to settle...`
 
 Reply to an expense message and type /revert to undo it.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       const targetMessageId = replyTo.message_id;
@@ -945,7 +947,7 @@ Reply to an expense message and type /revert to undo it.`
 Could not find an active expense for that message.
 It may have already been reverted.`
         );
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       // Mark as discarded
@@ -959,7 +961,7 @@ It may have already been reverted.`
 has been removed from records.`,
         messageId
       );
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     /* ================= EXPENSE PARSER ================= */
@@ -983,7 +985,7 @@ has been removed from records.`,
 
       if (validExpenses.length === 0) {
         await sendMessage(chatId, errors.join("\n\n"));
-        return new Response("OK", { status: 200 });
+        return res.status(200).send("OK");
       }
 
       // Save valid expenses
@@ -1012,14 +1014,14 @@ has been removed from records.`,
       }
 
       await sendMessage(chatId, response, messageId);
-      return new Response("OK", { status: 200 });
+      return res.status(200).send("OK");
     }
 
     // If no command matched and not an expense, ignore
-    return new Response("OK", { status: 200 });
+    return res.status(200).send("OK");
   } catch (err) {
     // Never throw — only log
     console.error("Webhook error:", err);
-    return new Response("OK", { status: 200 });
+    return res.status(200).send("OK");
   }
 }

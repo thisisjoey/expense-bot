@@ -59,6 +59,7 @@ function formatDate(ts) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Asia/Kolkata",
   });
 }
 
@@ -1556,6 +1557,7 @@ ${lines.join("\n")}`
         const date = new Date(e.ts).toLocaleDateString("en-IN", {
           day: "numeric",
           month: "short",
+          timeZone: "Asia/Kolkata",
         });
         const name =
           data.members.find((m) => m.userName === e.userName)?.displayName ||
@@ -1593,6 +1595,7 @@ ${lines.join("\n")}`
           month: "short",
           hour: "2-digit",
           minute: "2-digit",
+          timeZone: "Asia/Kolkata",
         });
         const name =
           data.members.find((m) => m.userName === e.userName)?.displayName ||

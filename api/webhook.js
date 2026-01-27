@@ -69,6 +69,113 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;");
 }
 
+/* ================= ALERTS HELPER ================= */
+
+async function generateAlerts(budgets, expenses, timeframe = "monthly") {
+  const categories = Object.keys(budgets);
+  if (!categories.length) {
+    return {
+      hasAlerts: false,
+      message: `📊 <b>No Categories</b>\n\nUse /addcategory to create categories first.`,
+    };
+  }
+
+  const activeExpenses = expenses.filter((e) => !e.discarded);
+  
+  // Get date boundaries based on timeframe
+  const now = new Date();
+  const currentDay = now.getDate();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  
+  let startDate;
+  let budgetMultiplier = 1; // For calculating period budget
+  let periodName = "";
+  
+  if (timeframe === "daily") {
+    startDate = new Date(currentYear, currentMonth, currentDay);
+    budgetMultiplier = 1 / 30; // daily budget = monthly / 30
+    periodName = "Today";
+  } else if (timeframe === "weekly") {
+    const dayOfWeek = now.getDay();
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    startDate = new Date(currentYear, currentMonth, currentDay - daysToMonday);
+    budgetMultiplier = 7 / 30; // weekly budget = monthly * 7 / 30
+    periodName = "This Week";
+  } else {
+    // monthly
+    startDate = new Date(currentYear, currentMonth, 1);
+    budgetMultiplier = 1;
+    periodName = "This Month";
+  }
+
+  const critical = []; // >= 90%
+  const warning = [];  // >= 75%
+  const watch = [];    // >= 50%
+  const healthy = [];  // < 50%
+
+  for (const cat of categories) {
+    const monthlyBudget = budgets[cat];
+    const periodBudget = monthlyBudget * budgetMultiplier;
+    
+    const spent = activeExpenses
+      .filter((e) => e.category === cat && new Date(e.ts) >= startDate)
+      .reduce((sum, e) => sum + e.amount, 0);
+    
+    const percent = periodBudget > 0 ? (spent / periodBudget) * 100 : 0;
+    const remaining = periodBudget - spent;
+
+    const line = `<b>${cat}</b>: ₹${spent.toFixed(0)}/₹${periodBudget.toFixed(0)} (${percent.toFixed(0)}%) • Left: ₹${remaining.toFixed(0)}`;
+
+    if (percent >= 90) {
+      critical.push(`🚨 ${line}`);
+    } else if (percent >= 75) {
+      warning.push(`⚠️ ${line}`);
+    } else if (percent >= 50) {
+      watch.push(`📊 ${line}`);
+    } else {
+      healthy.push(`✅ ${line}`);
+    }
+  }
+
+  // Build message
+  const sections = [];
+  
+  if (critical.length > 0) {
+    sections.push(`<b>🚨 CRITICAL (≥90%)</b>\n${critical.join("\n")}`);
+  }
+  
+  if (warning.length > 0) {
+    sections.push(`<b>⚠️ WARNING (≥75%)</b>\n${warning.join("\n")}`);
+  }
+  
+  if (watch.length > 0) {
+    sections.push(`<b>📊 WATCH (≥50%)</b>\n${watch.join("\n")}`);
+  }
+  
+  if (healthy.length > 0) {
+    sections.push(`<b>✅ HEALTHY (&lt;50%)</b>\n${healthy.join("\n")}`);
+  }
+
+  const hasAlerts = critical.length > 0 || warning.length > 0;
+  
+  let emoji = "✅";
+  if (critical.length > 0) emoji = "🚨";
+  else if (warning.length > 0) emoji = "⚠️";
+  else if (watch.length > 0) emoji = "📊";
+
+  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n${sections.join("\n\n")}`;
+
+  return {
+    hasAlerts,
+    critical: critical.length,
+    warning: warning.length,
+    watch: watch.length,
+    healthy: healthy.length,
+    message,
+  };
+}
+
 /* ================= FAST COMMANDS (NO DB) ================= */
 
 async function handleFastCommands(text, chatId) {
@@ -1113,6 +1220,77 @@ Status: ${settledCount}/${totalCount} members settled
       }
 
       return res.status(200).send("OK");
+    } "/settled") {
+      const userSettlement = data.settlements.find(
+        (s) => s.userName === userName
+      );
+
+      if (!userSettlement) {
+        await sendMessage(
+          chatId,
+          `❌ <b>Error</b>
+
+Could not find your settlement record.`
+        );
+        return res.status(200).send("OK");
+      }
+
+      if (userSettlement.settled) {
+        await sendMessage(
+          chatId,
+          `✅ <b>Already Settled</b>
+
+You're already marked as settled.
+Last settled: ${formatDate(userSettlement.lastSettledDate)}`
+        );
+        return res.status(200).send("OK");
+      }
+
+      // Mark user as settled
+      await updateSettlement(userName, {
+        settled: true,
+        lastSettledDate: now(),
+        telegramUserId,
+      });
+
+      // Refresh settlements
+      const updatedSettlements = await loadSettlements();
+      const allSettled = updatedSettlements.every((s) => s.settled);
+
+      if (allSettled) {
+        // Reset everything
+        await resetSettlements();
+
+        // Mark all expenses as discarded
+        const activeExpenses = data.expenses.filter((e) => !e.discarded);
+        for (const expense of activeExpenses) {
+          await updateExpense(expense.id, { discarded: true });
+        }
+
+        await sendMessage(
+          chatId,
+          `🎉 <b>All Settled!</b>
+
+Everyone has settled up!
+Ledger has been reset.
+
+<i>Previous expenses archived.
+Start fresh!</i>`
+        );
+      } else {
+        const settledCount = updatedSettlements.filter((s) => s.settled).length;
+        const totalCount = updatedSettlements.length;
+
+        await sendMessage(
+          chatId,
+          `✅ <b>Marked as Settled</b>
+
+Status: ${settledCount}/${totalCount} members settled
+<i>Waiting for others to settle...</i>`
+        );
+      }
+
+      return res.status(200).send("OK");
     }
 
     /* ================= REVERT COMMAND ================= */
@@ -1473,37 +1651,8 @@ ${lines.join("\n")}`
 
     /* ================= BUDGET ALERTS ================= */
     if (text === "/alerts") {
-      const categories = Object.keys(data.budgets);
-      const activeExpenses = data.expenses.filter((e) => !e.discarded);
-      const alerts = [];
-
-      for (const cat of categories) {
-        const spent = activeExpenses
-          .filter((e) => e.category === cat)
-          .reduce((sum, e) => sum + e.amount, 0);
-        const budget = data.budgets[cat];
-        const percent = (spent / budget) * 100;
-
-        if (percent >= 90) {
-          alerts.push(
-            `⚠️ <b>${cat}</b>: ${percent.toFixed(0)}% (₹${spent.toFixed(0)}/₹${budget})`
-          );
-        } else if (percent >= 75) {
-          alerts.push(
-            `⚡ <b>${cat}</b>: ${percent.toFixed(0)}% (₹${spent.toFixed(0)}/₹${budget})`
-          );
-        }
-      }
-
-      if (!alerts.length) {
-        await sendMessage(chatId, `✅ <b>All budgets healthy</b>`);
-        return res.status(200).send("OK");
-      }
-
-      await sendMessage(
-        chatId,
-        `⚠️ <b>Budget Alerts</b>\n\n${alerts.join("\n")}`
-      );
+      const alertData = await generateAlerts(data.budgets, data.expenses, "monthly");
+      await sendMessage(chatId, alertData.message);
       return res.status(200).send("OK");
     }
 

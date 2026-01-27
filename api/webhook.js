@@ -166,7 +166,14 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
   else if (warning.length > 0) emoji = "⚠️";
   else if (watch.length > 0) emoji = "📊";
 
-  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n${sections.join("\n\n")}`;
+  const totalBudget = Object.values(budgets).reduce((sum, b) => sum + b, 0);
+  const totalSpent = activeExpenses
+    .filter((e) => new Date(e.ts) >= startDate)
+    .reduce((sum, e) => sum + e.amount, 0);
+  const totalRemaining = totalBudget - totalSpent;
+  const totalPercent = totalBudget > 0 ? ((totalSpent / totalBudget) * 100).toFixed(1) : 0;
+
+  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n💼 <b>Overall Budget</b>\n   Spent: ₹${totalSpent.toFixed(0)} / ₹${totalBudget}\n   Left: ₹${totalRemaining.toFixed(0)} (${totalPercent}%)\n\n${sections.join("\n\n")}`;
 
   return {
     hasAlerts,
@@ -806,12 +813,14 @@ Add one with:
         return res.status(200).send("OK");
       }
 
+      const totalBudget = categories.reduce((sum, [_, budget]) => sum + budget, 0);
       const lines = categories.map(
         ([cat, budget]) => `📂 <b>${cat}</b>\n   Budget: ₹${budget}`
       );
+      const header = `📂 <b>Categories</b>\n\n💰 <b>Overall Budget:</b> ₹${totalBudget}`;
       await sendMessage(
         chatId,
-        `📂 <b>Categories</b>\n\n${lines.join("\n\n")}\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
+        `${header}\n\n${lines.join("\n\n")}\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
       );
       return res.status(200).send("OK");
     }
@@ -1134,6 +1143,9 @@ Use /addcategory to create categories first.`
       // IMPORTANT: For summary, show ALL non-discarded expenses (both settled and unsettled)
       const activeExpenses = data.expenses.filter((e) => !e.discarded);
       const lines = [];
+      const totalBudget = Object.values(data.budgets).reduce((sum, b) => sum + b, 0);
+      const totalSpent = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const totalRemaining = totalBudget - totalSpent;
 
       for (const cat of categories) {
         const spent = activeExpenses
@@ -1147,7 +1159,9 @@ Use /addcategory to create categories first.`
         lines.push(`${status} <b>${cat}</b>\n   Spent: ₹${spent.toFixed(0)} / ₹${budget}\n   Left: ₹${remaining.toFixed(0)} (${percent}%)`);
       }
 
-      await sendMessage(chatId, `📊 <b>Summary</b>\n\n${lines.join("\n\n")}`);
+      const overallStatus = totalRemaining >= 0 ? "✅" : "⚠️";
+      const header = `📊 <b>Summary</b>\n\n${overallStatus} <b>Overall Budget</b>\n   Spent: ₹${totalSpent.toFixed(0)} / ₹${totalBudget}\n   Left: ₹${totalRemaining.toFixed(0)}`;
+      await sendMessage(chatId, `${header}\n\n${lines.join("\n\n")}`);
       return res.status(200).send("OK");
     }
 
@@ -1501,9 +1515,13 @@ Expense not found or already reverted.`
         (a, b) => b[1] - a[1]
       )[0];
 
+      const totalBudget = Object.values(data.budgets).reduce((sum, b) => sum + b, 0);
+      const remaining = totalBudget - total;
+      const overallPercent = totalBudget > 0 ? ((total / totalBudget) * 100).toFixed(1) : 0;
+      
       await sendMessage(
         chatId,
-        `📊 <b>Stats</b>\n\n💰 Total: ₹${total.toFixed(2)}\n📝 Expenses: ${activeExpenses.length}\n📊 Average: ₹${avgPerExpense.toFixed(2)}\n\n🥇 Top Spender: ${escapeHtml(topSpenderName)}\n   ₹${topSpender[1].toFixed(2)}\n\n📌 Top Category: ${topCategory[0]}\n   ₹${topCategory[1].toFixed(2)}`
+        `📊 <b>Stats</b>\n\n💰 Total: ₹${total.toFixed(2)}\n📝 Expenses: ${activeExpenses.length}\n📊 Average: ₹${avgPerExpense.toFixed(2)}\n\n💼 <b>Overall Budget</b>\n   Spent: ₹${total.toFixed(2)} / ₹${totalBudget}\n   Left: ₹${remaining.toFixed(2)} (${overallPercent}%)\n\n🥇 Top Spender: ${escapeHtml(topSpenderName)}\n   ₹${topSpender[1].toFixed(2)}\n\n📌 Top Category: ${topCategory[0]}\n   ₹${topCategory[1].toFixed(2)}`
       );
       return res.status(200).send("OK");
     }

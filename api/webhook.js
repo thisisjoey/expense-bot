@@ -127,7 +127,12 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
     const percent = periodBudget > 0 ? (spent / periodBudget) * 100 : 0;
     const remaining = periodBudget - spent;
 
-    const line = `<b>${cat}</b>: ₹${spent.toFixed(0)}/₹${periodBudget.toFixed(0)} (${percent.toFixed(0)}%) • Left: ₹${remaining.toFixed(0)}`;
+    const catStr = cat.padEnd(16);
+    const spentStr = `₹${spent.toFixed(0)}`.padStart(10);
+    const budgetStr = `₹${periodBudget.toFixed(0)}`.padStart(10);
+    const percentStr = `${percent.toFixed(0)}%`.padStart(5);
+    const leftStr = `₹${remaining.toFixed(0)}`.padStart(10);
+    const line = `${catStr} │ ${spentStr}/${budgetStr} │ ${percentStr} │ Left: ${leftStr}`;
 
     if (percent >= 90) {
       critical.push(`🚨 ${line}`);
@@ -142,21 +147,22 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
 
   // Build message
   const sections = [];
+  const divider = `${\"─\".repeat(70)}`;
   
   if (critical.length > 0) {
-    sections.push(`<b>🚨 CRITICAL (≥90%)</b>\n${critical.join("\n")}`);
+    sections.push(`<b>🚨 CRITICAL (≥90%)</b>\n${divider}\n${critical.join("\n")}`);
   }
   
   if (warning.length > 0) {
-    sections.push(`<b>⚠️ WARNING (≥75%)</b>\n${warning.join("\n")}`);
+    sections.push(`<b>⚠️ WARNING (≥75%)</b>\n${divider}\n${warning.join("\n")}`);
   }
   
   if (watch.length > 0) {
-    sections.push(`<b>📊 WATCH (≥50%)</b>\n${watch.join("\n")}`);
+    sections.push(`<b>📊 WATCH (≥50%)</b>\n${divider}\n${watch.join("\n")}`);
   }
   
   if (healthy.length > 0) {
-    sections.push(`<b>✅ HEALTHY (&lt;50%)</b>\n${healthy.join("\n")}`);
+    sections.push(`<b>✅ HEALTHY (&lt;50%)</b>\n${divider}\n${healthy.join("\n")}`);
   }
 
   const hasAlerts = critical.length > 0 || warning.length > 0;
@@ -166,7 +172,7 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
   else if (warning.length > 0) emoji = "⚠️";
   else if (watch.length > 0) emoji = "📊";
 
-  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n${sections.join("\n\n")}`;
+  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n<pre>${sections.join("\n\n")}</pre>`;
 
   return {
     hasAlerts,
@@ -807,11 +813,13 @@ Add one with:
       }
 
       const lines = categories.map(
-        ([cat, budget]) => `• ${cat}: ₹${budget}`
+        ([cat, budget]) => `${cat.padEnd(20)} │ ₹${budget.toString().padStart(8)}`
       );
+      const header = `${'Category'.padEnd(20)} │ Budget`;
+      const divider = `${\"─\".repeat(20)}┼${\"─\".repeat(10)}`;
       await sendMessage(
         chatId,
-        `📂 <b>Categories</b>\n\n${lines.join("\n")}\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
+        `📂 <b>Categories</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
       );
       return res.status(200).send("OK");
     }
@@ -1006,14 +1014,18 @@ Members are added automatically when they interact with the bot.`
         return res.status(200).send("OK");
       }
 
-      const lines = data.members.map((m) => {
+      const lines = data.members.map((m, idx) => {
         const name = m.displayName || m.username || m.userName;
-        return `• ${escapeHtml(name)}`;
+        const numStr = `${idx + 1}`.padStart(2);
+        const nameStr = escapeHtml(name).padEnd(20);
+        return `${numStr}. ${nameStr} │ @${m.username || "n/a"}`;
       });
+      const header = `Rank  Name                 │ Username`;
+      const divider = `${\"─\".repeat(50)}`;
 
       await sendMessage(
         chatId,
-        `👥 <b>Registered Members</b>\n\n${lines.join("\n")}\n\n<i>Total: ${data.members.length}</i>`
+        `👥 <b>Registered Members (${data.members.length})</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>`
       );
       return res.status(200).send("OK");
     }
@@ -1142,12 +1154,17 @@ Use /addcategory to create categories first.`
         const percent = budget > 0 ? ((spent / budget) * 100).toFixed(1) : 0;
 
         const status = remaining >= 0 ? "✅" : "⚠️";
-        lines.push(
-          `${status} <b>${cat}</b>: ₹${spent.toFixed(0)}/₹${budget} (${percent}%)\n   Left: ₹${remaining.toFixed(0)}`
-        );
+        const catName = cat.padEnd(15);
+        const spentStr = `₹${spent.toFixed(0)}`.padStart(8);
+        const budgetStr = `₹${budget}`.padStart(8);
+        const percentStr = `${percent}%`.padStart(6);
+        const leftStr = `₹${remaining.toFixed(0)}`.padStart(8);
+        lines.push(`${status} ${catName} │ ${spentStr}/${budgetStr} │ ${percentStr} │ Left: ${leftStr}`);
       }
+      const header = `   Category         │  Spent  /  Budget  │ Used% │ Remaining`;
+      const divider = `${\"─\".repeat(65)}`;
 
-      await sendMessage(chatId, `📊 <b>Summary</b>\n\n${lines.join("\n\n")}`);
+      await sendMessage(chatId, `📊 <b>Summary</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>`);
       return res.status(200).send("OK");
     }
 
@@ -1244,7 +1261,7 @@ Per person: ₹${perPerson.toFixed(2)}`
             ?.displayName || debtor.userName;
 
         settlements.push(
-          `${escapeHtml(debtorName)} → ${escapeHtml(creditorName)}: <b>₹${amount.toFixed(2)}</b>`
+          `${debtorName.padEnd(18)} → ${creditorName.padEnd(18)} │ ${`₹${amount.toFixed(2)}`.padStart(10)}`
         );
 
         creditor.amount -= amount;
@@ -1255,12 +1272,15 @@ Per person: ₹${perPerson.toFixed(2)}`
       }
 
       const lines = [
-        `<b>Total:</b> ₹${totalSpent.toFixed(2)} • <b>Per person:</b> ₹${perPerson.toFixed(2)}`,
-        "",
-        ...settlements,
+        `<b>Total:</b> ₹${totalSpent.toFixed(2)}
+<b>Per person:</b> ₹${perPerson.toFixed(2)}`,
       ];
 
-      await sendMessage(chatId, `💸 <b>Settlements</b>\n\n${lines.join("\n")}`);
+      const summaryText = `Total to settle    ₹${totalSpent.toFixed(2)}\nPer person share   ₹${perPerson.toFixed(2)}`;
+      const header = `Debtor             → Creditor          │ Amount`;
+      const divider = `${\"─\".repeat(65)}`;
+
+      await sendMessage(chatId, `💸 <b>Settlements</b>\n\n<pre>${summaryText}\n${divider}\n${header}\n${divider}\n${settlements.join("\n")}</pre>`);
       return res.status(200).send("OK");
     }
 
@@ -1500,16 +1520,11 @@ Expense not found or already reverted.`
         (a, b) => b[1] - a[1]
       )[0];
 
+      const statsText = `\nMetric              Value\n${\"─\".repeat(35)}\nTotal Spent        ₹${total.toFixed(2).padStart(12)}\nTotal Expenses     ${activeExpenses.length.toString().padStart(16)}\nAverage/Expense    ₹${avgPerExpense.toFixed(2).padStart(12)}\n${\"─\".repeat(35)}\nTop Spender        ${escapeHtml(topSpenderName).padEnd(12)} (₹${topSpender[1].toFixed(2)})\nTop Category       ${topCategory[0].padEnd(12)} (₹${topCategory[1].toFixed(2)})`;
+
       await sendMessage(
         chatId,
-        `📊 <b>Stats</b>
-
-<b>Total:</b> ₹${total.toFixed(2)}
-<b>Expenses:</b> ${activeExpenses.length}
-<b>Average:</b> ₹${avgPerExpense.toFixed(2)}
-
-<b>Top spender:</b> ${escapeHtml(topSpenderName)} (₹${topSpender[1].toFixed(2)})
-<b>Top category:</b> ${topCategory[0]} (₹${topCategory[1].toFixed(2)})`
+        `📊 <b>Stats</b>\n\n<pre>${statsText}</pre>`
       );
       return res.status(200).send("OK");
     }
@@ -1540,10 +1555,15 @@ Expense not found or already reverted.`
           userName;
         const medal =
           idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : "  ";
-        return `${medal} ${escapeHtml(name)}: <b>₹${amount.toFixed(2)}</b>`;
+        const rankStr = `${idx + 1}`.padStart(2);
+        const nameStr = escapeHtml(name).padEnd(20);
+        const amountStr = `₹${amount.toFixed(2)}`.padStart(12);
+        return `${medal} ${rankStr}. ${nameStr} │ ${amountStr}`;
       });
+      const header = `   Rank  Name                 │ Amount`;
+      const divider = `${\"─\".repeat(50)}`;
 
-      await sendMessage(chatId, `🏆 <b>Top Spenders</b>\n\n${lines.join("\n")}`);
+      await sendMessage(chatId, `🏆 <b>Top Spenders</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>`);
       return res.status(200).send("OK");
     }
 
@@ -1579,16 +1599,19 @@ Expense not found or already reverted.`
       const monthName = now.toLocaleString("default", { month: "long" });
       const lines = Object.entries(byCategory)
         .sort((a, b) => b[1] - a[1])
-        .map(([cat, amount]) => `${cat}: <b>₹${amount.toFixed(2)}</b>`);
+        .map(([cat, amount]) => {
+          const catStr = cat.padEnd(18);
+          const amountStr = `₹${amount.toFixed(2)}`.padStart(12);
+          return `${catStr} │ ${amountStr}`;
+        });
+      const header = `Category           │ Amount`;
+      const divider = `${\"─\".repeat(42)}`;
+
+      const summaryText = `Total Spent     ₹${total.toFixed(2)}\nExpenses Count  ${monthlyExpenses.length}`;
 
       await sendMessage(
         chatId,
-        `📅 <b>${monthName} ${currentYear}</b>
-
-<b>Total:</b> ₹${total.toFixed(2)}
-<b>Expenses:</b> ${monthlyExpenses.length}
-
-${lines.join("\n")}`
+        `📅 <b>${monthName} ${currentYear}</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}\n${divider}\n${summaryText}</pre>`
       );
       return res.status(200).send("OK");
     }
@@ -1628,15 +1651,20 @@ ${lines.join("\n")}`
         const name =
           data.members.find((m) => m.userName === e.userName)?.displayName ||
           e.userName;
-        const settledBadge = e.settled ? "✓" : "";
-        return `${date} • ${escapeHtml(name)} • <b>₹${e.amount}</b> - ${e.category} ${settledBadge}`;
+        const settled = e.settled ? "✓" : "";
+        const dateStr = date.padEnd(8);
+        const nameStr = escapeHtml(name).padEnd(15);
+        const amountStr = `₹${e.amount.toFixed(0)}`.padStart(8);
+        return `${dateStr} │ ${nameStr} │ ${amountStr} │ ${e.category} ${settled}`;
       });
+      const header = `Date     │ User            │ Amount  │ Category`;
+      const divider = `${\"─\".repeat(60)}`;
 
       const more =
         results.length > 10 ? `\n\n<i>+${results.length - 10} more</i>` : "";
       await sendMessage(
         chatId,
-        `🔍 <b>Results (${results.length})</b>\n\n${lines.join("\n")}${more}`
+        `🔍 <b>Results (${results.length})</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>${more}`
       );
       return res.status(200).send("OK");
     }
@@ -1668,13 +1696,18 @@ ${lines.join("\n")}`
         const name =
           data.members.find((m) => m.userName === e.userName)?.displayName ||
           e.userName;
-        const settledBadge = e.settled ? " ✓" : "";
-        return `${date} • ${escapeHtml(name)}\n<b>₹${e.amount}</b> - ${e.category}${settledBadge}`;
+        const settled = e.settled ? "✓" : "";
+        const dateStr = date.padEnd(13);
+        const nameStr = escapeHtml(name).padEnd(15);
+        const amountStr = `₹${e.amount.toFixed(0)}`.padStart(8);
+        return `${dateStr} │ ${nameStr} │ ${amountStr} │ ${e.category} ${settled}`;
       });
+      const header = `Date/Time       │ User            │ Amount  │ Category`;
+      const divider = `${\"─\".repeat(65)}`;
 
       await sendMessage(
         chatId,
-        `📝 <b>Last ${recent.length}</b>\n\n${lines.join("\n\n")}`
+        `📝 <b>Last ${recent.length}</b>\n\n<pre>${header}\n${divider}\n${lines.join("\n")}</pre>`
       );
       return res.status(200).send("OK");
     }

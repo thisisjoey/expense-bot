@@ -431,14 +431,26 @@ Examples: 90-grocery, 90 grocery
   }
   
   // Parse expense
+  console.log('Trying to parse expense');
   const budgets = await getBudgets();
+  console.log('Got budgets:', budgets);
+  
   const amounts = text.match(/\d+/g);
-  if (!amounts) return;
+  console.log('Found amounts:', amounts);
+  
+  if (!amounts) {
+    console.log('No amounts found, returning');
+    return;
+  }
   
   const words = text.toLowerCase().match(/\b[a-z]+\b/g) || [];
   const categories = words.filter(w => budgets[w]);
+  console.log('Found categories:', categories);
   
-  if (!amounts.length || !categories.length) return;
+  if (!amounts.length || !categories.length) {
+    console.log('Invalid expense format, returning');
+    return;
+  }
   
   // Auto-add member
   const members = await getMembers();

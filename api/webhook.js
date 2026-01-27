@@ -188,6 +188,7 @@ async function handleFastCommands(text, chatId) {
 <b>Add Expenses:</b>
 • 90-grocery or 90 grocery
 • 50+30-ai or 100-grocery,ai
+• Just type any number (e.g., 150) → goes to "uncategorized"
 
 <b>Basic Commands:</b>
 /categories - View all categories
@@ -244,6 +245,12 @@ async function loadBudgets() {
 
   const budgets = {};
   (data || []).forEach((r) => (budgets[r.category] = Number(r.budget) || 0));
+  
+  // Ensure "uncategorized" exists with a default budget of 0
+  if (!budgets["uncategorized"]) {
+    budgets["uncategorized"] = 0;
+  }
+  
   return budgets;
 }
 
@@ -264,6 +271,14 @@ async function saveBudgets(budgets) {
       throw error;
     }
   }
+}
+
+async function ensureUncategorizedExists(budgets) {
+  if (!budgets["uncategorized"]) {
+    budgets["uncategorized"] = 0;
+    await saveBudgets({ uncategorized: 0 });
+  }
+  return budgets;
 }
 
 async function loadExpenses() {
@@ -583,6 +598,27 @@ function parseExpense(text) {
     });
   }
 
+  // Pattern 5: Standalone numbers (any number without category)
+  // This will catch numbers that weren't already matched by previous patterns
+  const pattern5 = /\b(\d+(?:\.\d+)?)\b/g;
+  const originalText = text.toLowerCase();
+  while ((match = pattern5.exec(originalText)) !== null) {
+    const amount = parseFloat(match[1]);
+    // Skip very small numbers (likely not expenses) and very large numbers (likely phone numbers, etc)
+    if (amount >= 1 && amount <= 100000) {
+      const key = `${amount}-uncategorized`;
+      // Only add if this exact amount hasn't been categorized already
+      const alreadyCategorized = results.some(r => r.amount === amount);
+      if (!seen.has(key) && !alreadyCategorized) {
+        results.push({
+          amount: amount,
+          category: "uncategorized",
+        });
+        seen.add(key);
+      }
+    }
+  }
+
   return results;
 }
 
@@ -688,6 +724,9 @@ export default async function handler(req, res) {
 
     // Load all data for other commands (optimized with Promise.all)
     const data = await loadAllData();
+    
+    // Ensure uncategorized category exists
+    data.budgets = await ensureUncategorizedExists(data.budgets);
 
     /* ================= CATEGORIES COMMAND ================= */
 
@@ -709,7 +748,7 @@ Add one with:
       );
       await sendMessage(
         chatId,
-        `📂 <b>Categories</b>\n\n${lines.join("\n")}`
+        `📂 <b>Categories</b>\n\n${lines.join("\n")}\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
       );
       return res.status(200).send("OK");
     }
@@ -829,6 +868,18 @@ Example: /deletecategory ai`
       }
 
       const cat = parts[1];
+      
+      // Prevent deletion of uncategorized
+      if (cat === "uncategorized") {
+        await sendMessage(
+          chatId,
+          `❌ <b>Cannot delete</b>
+
+"uncategorized" is a default category and cannot be deleted.`
+        );
+        return res.status(200).send("OK");
+      }
+      
       if (!data.budgets[cat]) {
         await sendMessage(
           chatId,
@@ -1220,77 +1271,6 @@ Status: ${settledCount}/${totalCount} members settled
       }
 
       return res.status(200).send("OK");
-    } "/settled") {
-      const userSettlement = data.settlements.find(
-        (s) => s.userName === userName
-      );
-
-      if (!userSettlement) {
-        await sendMessage(
-          chatId,
-          `❌ <b>Error</b>
-
-Could not find your settlement record.`
-        );
-        return res.status(200).send("OK");
-      }
-
-      if (userSettlement.settled) {
-        await sendMessage(
-          chatId,
-          `✅ <b>Already Settled</b>
-
-You're already marked as settled.
-Last settled: ${formatDate(userSettlement.lastSettledDate)}`
-        );
-        return res.status(200).send("OK");
-      }
-
-      // Mark user as settled
-      await updateSettlement(userName, {
-        settled: true,
-        lastSettledDate: now(),
-        telegramUserId,
-      });
-
-      // Refresh settlements
-      const updatedSettlements = await loadSettlements();
-      const allSettled = updatedSettlements.every((s) => s.settled);
-
-      if (allSettled) {
-        // Reset everything
-        await resetSettlements();
-
-        // Mark all expenses as discarded
-        const activeExpenses = data.expenses.filter((e) => !e.discarded);
-        for (const expense of activeExpenses) {
-          await updateExpense(expense.id, { discarded: true });
-        }
-
-        await sendMessage(
-          chatId,
-          `🎉 <b>All Settled!</b>
-
-Everyone has settled up!
-Ledger has been reset.
-
-<i>Previous expenses archived.
-Start fresh!</i>`
-        );
-      } else {
-        const settledCount = updatedSettlements.filter((s) => s.settled).length;
-        const totalCount = updatedSettlements.length;
-
-        await sendMessage(
-          chatId,
-          `✅ <b>Marked as Settled</b>
-
-Status: ${settledCount}/${totalCount} members settled
-<i>Waiting for others to settle...</i>`
-        );
-      }
-
-      return res.status(200).send("OK");
     }
 
     /* ================= REVERT COMMAND ================= */
@@ -1346,12 +1326,13 @@ Expense not found or already reverted.`
       const errors = [];
 
       for (const exp of parsedExpenses) {
-        if (!data.budgets[exp.category]) {
+        // Allow "uncategorized" category to pass through
+        if (exp.category === "uncategorized" || data.budgets[exp.category]) {
+          validExpenses.push(exp);
+        } else {
           errors.push(
             `❌ "${exp.category}" - category doesn't exist. Use /categories to see available categories.`
           );
-        } else {
-          validExpenses.push(exp);
         }
       }
 

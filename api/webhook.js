@@ -1,8 +1,13 @@
 // api/webhook.js
-import { kv } from '@vercel/kv';
+import { createClient } from '@supabase/supabase-js';
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const BOT_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // ================= HELPERS =================
 async function sendMessage(chatId, text, replyTo) {
@@ -18,9 +23,10 @@ async function sendMessage(chatId, text, replyTo) {
 }
 
 async function sendDocument(chatId, csvData, filename) {
+  const blob = new Blob([csvData], { type: 'text/csv' });
   const formData = new FormData();
-  formData.append('chat_id', chatId);
-  formData.append('document', new Blob([csvData], { type: 'text/csv' }), filename);
+  formData.append('chat_id', chatId.toString());
+  formData.append('document', blob, filename);
   
   await fetch(`${BOT_API}/sendDocument`, {
     method: 'POST',
@@ -37,7 +43,7 @@ function formatDate(ts) {
   const date = new Date(ts);
   return date.toLocaleDateString("en-IN", {
     day: "numeric",
-    month: "short", 
+    month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit"
@@ -46,43 +52,87 @@ function formatDate(ts) {
 
 // ================= DATA ACCESS =================
 async function getBudgets() {
-  return await kv.get('budgets') || { grocery: 150, ai: 1000 };
+  const { data } = await supabase.from('budgets').select('*');
+  const budgets = {};
+  (data || []).forEach(row => budgets[row.category] = row.budget);
+  return budgets;
 }
 
-async function setBudgets(budgets) {
-  await kv.set('budgets', budgets);
+async function setBudget(category, budget) {
+  await supabase.from('budgets').upsert({ category, budget });
+}
+
+async function deleteBudget(category) {
+  await supabase.from('budgets').delete().eq('category', category);
 }
 
 async function getExpenses() {
-  return await kv.get('expenses') || [];
+  const { data } = await supabase.from('expenses').select('*').order('created_at', { ascending: false });
+  return (data || []).map(row => ({
+    id: row.message_id,
+    user: row.user_name,
+    amount: Number(row.amount),
+    category: row.category,
+    comment: row.comment,
+    ts: row.created_at,
+    discarded: row.discarded
+  }));
 }
 
-async function setExpenses(expenses) {
-  await kv.set('expenses', expenses);
+async function addExpense(messageId, user, amount, category, comment) {
+  await supabase.from('expenses').insert({
+    message_id: messageId,
+    user_name: user,
+    amount,
+    category,
+    comment,
+    created_at: now(),
+    discarded: false
+  });
 }
 
 async function getMembers() {
-  return await kv.get('members') || [];
+  const { data } = await supabase.from('members').select('user_name');
+  return (data || []).map(row => row.user_name);
 }
 
-async function setMembers(members) {
-  await kv.set('members', members);
+async function addMember(userName) {
+  await supabase.from('members').upsert({ user_name: userName });
+}
+
+async function removeMember(userName) {
+  await supabase.from('members').delete().eq('user_name', userName);
+  await supabase.from('settlements').delete().eq('user_name', userName);
 }
 
 async function getSettlements() {
-  return await kv.get('settlements') || {};
+  const { data } = await supabase.from('settlements').select('*');
+  const settlements = {};
+  let lastSettledDate = null;
+  (data || []).forEach(row => {
+    settlements[row.user_name] = row.settled;
+    if (row.last_settled_date) lastSettledDate = row.last_settled_date;
+  });
+  return { settlements, lastSettledDate };
 }
 
-async function setSettlements(settlements) {
-  await kv.set('settlements', settlements);
+async function markSettled(userName) {
+  await supabase.from('settlements').upsert({
+    user_name: userName,
+    settled: true
+  });
 }
 
-async function getLastSettledDate() {
-  return await kv.get('lastSettledDate') || null;
-}
-
-async function setLastSettledDate(date) {
-  await kv.set('lastSettledDate', date);
+async function resetSettlements(members) {
+  await supabase.from('settlements').delete().neq('user_name', '');
+  const settlementsData = members.map(m => ({
+    user_name: m,
+    settled: false,
+    last_settled_date: now()
+  }));
+  if (settlementsData.length > 0) {
+    await supabase.from('settlements').insert(settlementsData);
+  }
 }
 
 // ================= EXCEL EXPORT =================
@@ -90,31 +140,23 @@ async function generateCSV() {
   const budgets = await getBudgets();
   const expenses = await getExpenses();
   const members = await getMembers();
-  const settlements = await getSettlements();
-  const lastSettledDate = await getLastSettledDate();
+  const { settlements, lastSettledDate } = await getSettlements();
   
   let csv = '';
   
-  // Budgets sheet
   csv += 'BUDGETS\n';
   csv += 'Category,Budget\n';
   Object.entries(budgets).forEach(([cat, budget]) => {
     csv += `${cat},${budget}\n`;
   });
   
-  csv += '\n';
-  
-  // Expenses sheet
-  csv += 'EXPENSES\n';
+  csv += '\nEXPENSES\n';
   csv += 'ID,User,Amount,Category,Comment,Timestamp,Discarded\n';
   expenses.forEach(e => {
     csv += `${e.id},${e.user},${e.amount},${e.category},"${e.comment}",${e.ts},${e.discarded}\n`;
   });
   
-  csv += '\n';
-  
-  // Members sheet
-  csv += 'MEMBERS\n';
+  csv += '\nMEMBERS\n';
   csv += 'User,Settled,Last Settled Date\n';
   members.forEach(m => {
     csv += `${m},${settlements[m] ? 'TRUE' : 'FALSE'},${lastSettledDate || ''}\n`;
@@ -125,9 +167,6 @@ async function generateCSV() {
 
 // ================= COMMAND HANDLERS =================
 async function handleCommand(chatId, user, text, messageId) {
-  const budgets = await getBudgets();
-  const members = await getMembers();
-  
   if (text === '/commands') {
     await sendMessage(chatId, `📘 Expense Bot Commands Guide
 
@@ -156,9 +195,6 @@ Examples: 90-grocery, 90 grocery
 📥 Export Data
 /export - Download all data as CSV
 
-♻️ Revert
-Reply to expense with /revert
-
 ℹ️ Help
 /commands - This guide`);
     return;
@@ -173,6 +209,7 @@ Reply to expense with /revert
   }
   
   if (text === '/categories') {
+    const budgets = await getBudgets();
     if (Object.keys(budgets).length === 0) {
       await sendMessage(chatId, `📂 Categories & Budgets\n\nNo categories yet.\nUse /addcategory <n> <budget>`);
       return;
@@ -188,38 +225,38 @@ Reply to expense with /revert
       await sendMessage(chatId, '❌ Usage: /addcategory <n> <budget>\nExample: /addcategory travel 2000');
       return;
     }
-    budgets[cat] = Number(budget);
-    await setBudgets(budgets);
+    await setBudget(cat, Number(budget));
     await sendMessage(chatId, `✅ Category Added\n\n${cat}: ₹${budget}`);
     return;
   }
   
   if (text.startsWith('/setbudget')) {
     const [, cat, budget] = text.split(' ');
+    const budgets = await getBudgets();
     if (!cat || isNaN(budget) || !budgets[cat]) {
       await sendMessage(chatId, '❌ Usage: /setbudget <n> <budget>\nExample: /setbudget grocery 300');
       return;
     }
     const old = budgets[cat];
-    budgets[cat] = Number(budget);
-    await setBudgets(budgets);
+    await setBudget(cat, Number(budget));
     await sendMessage(chatId, `💰 Budget Updated\n\n${cat}\n₹${old} → ₹${budget}`);
     return;
   }
   
   if (text.startsWith('/deletecategory')) {
     const cat = text.split(' ')[1];
+    const budgets = await getBudgets();
     if (!cat || !budgets[cat]) {
       await sendMessage(chatId, '❌ Category not found');
       return;
     }
-    delete budgets[cat];
-    await setBudgets(budgets);
+    await deleteBudget(cat);
     await sendMessage(chatId, `🗑️ Category Deleted\n\n${cat} removed`);
     return;
   }
   
   if (text === '/members') {
+    const members = await getMembers();
     if (members.length === 0) {
       await sendMessage(chatId, '👥 No members registered.\nUse /addmember <n>');
       return;
@@ -235,31 +272,32 @@ Reply to expense with /revert
       await sendMessage(chatId, '❌ Usage: /addmember <n>');
       return;
     }
+    const members = await getMembers();
     if (members.includes(name)) {
       await sendMessage(chatId, `⚠️ ${name} already registered`);
       return;
     }
-    members.push(name);
-    await setMembers(members);
-    await sendMessage(chatId, `✅ Member Added\n\n${name} registered\nTotal: ${members.length}`);
+    await addMember(name);
+    await sendMessage(chatId, `✅ Member Added\n\n${name} registered\nTotal: ${members.length + 1}`);
     return;
   }
   
   if (text.startsWith('/removemember')) {
     const name = text.split(' ')[1];
-    const idx = members.indexOf(name);
-    if (idx === -1) {
+    const members = await getMembers();
+    if (!members.includes(name)) {
       await sendMessage(chatId, '❌ Member not found');
       return;
     }
-    members.splice(idx, 1);
-    await setMembers(members);
-    await sendMessage(chatId, `🗑️ Member Removed\n\n${name} removed\nRemaining: ${members.length}`);
+    await removeMember(name);
+    await sendMessage(chatId, `🗑️ Member Removed\n\n${name} removed\nRemaining: ${members.length - 1}`);
     return;
   }
   
   if (text === '/summary') {
+    const budgets = await getBudgets();
     const expenses = await getExpenses();
+    
     if (Object.keys(budgets).length === 0) {
       await sendMessage(chatId, '📊 No categories configured');
       return;
@@ -285,7 +323,8 @@ Reply to expense with /revert
   
   if (text === '/owe') {
     const expenses = await getExpenses();
-    const lastSettledDate = await getLastSettledDate();
+    const members = await getMembers();
+    const { settlements, lastSettledDate } = await getSettlements();
     
     const valid = expenses.filter(e => {
       if (e.discarded) return false;
@@ -349,8 +388,8 @@ Reply to expense with /revert
   
   if (text === '/settled') {
     const expenses = await getExpenses();
-    const lastSettledDate = await getLastSettledDate();
-    const settlements = await getSettlements();
+    const members = await getMembers();
+    const { settlements, lastSettledDate } = await getSettlements();
     
     const valid = expenses.filter(e => {
       if (e.discarded) return false;
@@ -365,22 +404,22 @@ Reply to expense with /revert
       return;
     }
     
-    settlements[user] = true;
-    await setSettlements(settlements);
+    await markSettled(user);
+    const updatedSettlements = await getSettlements();
     
-    if (users.every(u => settlements[u])) {
-      await setLastSettledDate(now());
-      await setSettlements({});
+    if (users.every(u => updatedSettlements.settlements[u])) {
+      await resetSettlements(members);
       await sendMessage(chatId, `🎉 Everyone Settled!\n\nAll balances cleared.\nExpense history preserved.\n\n📅 Settled on: ${formatDate(now())}`);
     } else {
-      const settled = Object.keys(settlements).filter(u => settlements[u]);
-      const pending = users.filter(u => !settlements[u]);
+      const settled = Object.keys(updatedSettlements.settlements).filter(u => updatedSettlements.settlements[u]);
+      const pending = users.filter(u => !updatedSettlements.settlements[u]);
       await sendMessage(chatId, `☑️ Marked as Settled\n\n${user} is settled.\n\n✅ Settled: ${settled.join(', ')}\n⏳ Pending: ${pending.join(', ')}`);
     }
     return;
   }
   
   // Parse expense
+  const budgets = await getBudgets();
   const amounts = text.match(/\d+/g);
   if (!amounts) return;
   
@@ -390,9 +429,9 @@ Reply to expense with /revert
   if (!amounts.length || !categories.length) return;
   
   // Auto-add member
+  const members = await getMembers();
   if (!members.includes(user)) {
-    members.push(user);
-    await setMembers(members);
+    await addMember(user);
   }
   
   const expenses = await getExpenses();
@@ -413,17 +452,9 @@ Reply to expense with /revert
   
   for (const p of pairs) {
     totalAdded += p.amount;
-    expenses.push({
-      id: messageId,
-      user,
-      amount: p.amount,
-      category: p.category,
-      comment: text,
-      ts: now(),
-      discarded: false
-    });
+    await addExpense(messageId, user, p.amount, p.category, text);
     
-    const futureSpent = expenses.filter(e => e.category === p.category && !e.discarded).reduce((s, e) => s + e.amount, 0);
+    const futureSpent = expenses.filter(e => e.category === p.category && !e.discarded).reduce((s, e) => s + e.amount, 0) + p.amount;
     const budget = budgets[p.category];
     const pct = Math.round((futureSpent / budget) * 100);
     const emoji = pct >= 100 ? '🔴' : pct >= 80 ? '🟡' : '🟢';
@@ -431,8 +462,7 @@ Reply to expense with /revert
     confirm.push(`${emoji} ${p.category}: ₹${p.amount}\n   ${pct}% of ₹${budget} budget used`);
   }
   
-  await setExpenses(expenses);
-  await sendMessage(chatId, `✅ Expense Recorded\n\n👤 ${user}\n💰 Total: ₹${totalAdded}\n\n${confirm.join('\n\n')}\n\nReply /revert to undo`, messageId);
+  await sendMessage(chatId, `✅ Expense Recorded\n\n👤 ${user}\n💰 Total: ₹${totalAdded}\n\n${confirm.join('\n\n')}`, messageId);
 }
 
 // ================= WEBHOOK HANDLER =================
@@ -454,7 +484,6 @@ export default async function handler(req, res) {
     const text = msg.text.trim();
     const messageId = msg.message_id;
     
-    // Process command asynchronously
     handleCommand(chatId, user, text, messageId).catch(err => console.error(err));
     
     return res.status(200).json({ ok: true });

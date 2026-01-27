@@ -70,6 +70,28 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;");
 }
 
+// Helper to create monospace table
+function createTable(headers, rows) {
+  // Calculate column widths
+  const colWidths = headers.map((h, i) => {
+    const maxRowWidth = Math.max(...rows.map(r => String(r[i] || '').length));
+    return Math.max(h.length, maxRowWidth);
+  });
+  
+  // Create separator
+  const separator = colWidths.map(w => '─'.repeat(w)).join('┼');
+  
+  // Format header
+  const headerRow = headers.map((h, i) => h.padEnd(colWidths[i])).join('│');
+  
+  // Format rows
+  const dataRows = rows.map(row =>
+    row.map((cell, i) => String(cell || '').padEnd(colWidths[i])).join('│')
+  );
+  
+  return `<pre>${headerRow}\n${separator}\n${dataRows.join('\n')}</pre>`;
+}
+
 /* ================= ALERTS HELPER ================= */
 
 async function generateAlerts(budgets, expenses, timeframe = "monthly") {
@@ -90,30 +112,26 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
   const currentYear = now.getFullYear();
   
   let startDate;
-  let budgetMultiplier = 1; // For calculating period budget
+  let budgetMultiplier = 1;
   let periodName = "";
   
   if (timeframe === "daily") {
     startDate = new Date(currentYear, currentMonth, currentDay);
-    budgetMultiplier = 1 / 30; // daily budget = monthly / 30
+    budgetMultiplier = 1 / 30;
     periodName = "Today";
   } else if (timeframe === "weekly") {
     const dayOfWeek = now.getDay();
     const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     startDate = new Date(currentYear, currentMonth, currentDay - daysToMonday);
-    budgetMultiplier = 7 / 30; // weekly budget = monthly * 7 / 30
+    budgetMultiplier = 7 / 30;
     periodName = "This Week";
   } else {
-    // monthly
     startDate = new Date(currentYear, currentMonth, 1);
     budgetMultiplier = 1;
     periodName = "This Month";
   }
 
-  const critical = []; // >= 90%
-  const warning = [];  // >= 75%
-  const watch = [];    // >= 50%
-  const healthy = [];  // < 50%
+  const tableData = [];
 
   for (const cat of categories) {
     const monthlyBudget = budgets[cat];
@@ -126,53 +144,48 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
     const percent = periodBudget > 0 ? (spent / periodBudget) * 100 : 0;
     const remaining = periodBudget - spent;
 
-    const line = `<b>${cat}</b>: ₹${spent.toFixed(0)}/₹${periodBudget.toFixed(0)} (${percent.toFixed(0)}%) • Left: ₹${remaining.toFixed(0)}`;
+    let status;
+    if (percent >= 90) status = "🚨";
+    else if (percent >= 75) status = "⚠️";
+    else if (percent >= 50) status = "📊";
+    else status = "✅";
 
-    if (percent >= 90) {
-      critical.push(`🚨 ${line}`);
-    } else if (percent >= 75) {
-      warning.push(`⚠️ ${line}`);
-    } else if (percent >= 50) {
-      watch.push(`📊 ${line}`);
-    } else {
-      healthy.push(`✅ ${line}`);
-    }
-  }
-
-  // Build message
-  const sections = [];
-  
-  if (critical.length > 0) {
-    sections.push(`<b>🚨 CRITICAL (≥90%)</b>\n${critical.join("\n")}`);
-  }
-  
-  if (warning.length > 0) {
-    sections.push(`<b>⚠️ WARNING (≥75%)</b>\n${warning.join("\n")}`);
-  }
-  
-  if (watch.length > 0) {
-    sections.push(`<b>📊 WATCH (≥50%)</b>\n${watch.join("\n")}`);
-  }
-  
-  if (healthy.length > 0) {
-    sections.push(`<b>✅ HEALTHY (&lt;50%)</b>\n${healthy.join("\n")}`);
+    tableData.push([
+      status,
+      cat.substring(0, 12), // Limit category name length
+      `₹${spent.toFixed(0)}`,
+      `₹${periodBudget.toFixed(0)}`,
+      `${percent.toFixed(0)}%`,
+      `₹${remaining.toFixed(0)}`
+    ]);
   }
 
-  const hasAlerts = critical.length > 0 || warning.length > 0;
-  
+  // Sort by percentage descending
+  tableData.sort((a, b) => {
+    const aPercent = parseFloat(a[4]);
+    const bPercent = parseFloat(b[4]);
+    return bPercent - aPercent;
+  });
+
+  const table = createTable(
+    ['', 'Category', 'Spent', 'Budget', '%', 'Left'],
+    tableData
+  );
+
+  const hasAlerts = tableData.some(row => row[0] === '🚨' || row[0] === '⚠️');
+  const critical = tableData.filter(row => row[0] === '🚨').length;
+  const warning = tableData.filter(row => row[0] === '⚠️').length;
+
   let emoji = "✅";
-  if (critical.length > 0) emoji = "🚨";
-  else if (warning.length > 0) emoji = "⚠️";
-  else if (watch.length > 0) emoji = "📊";
+  if (critical > 0) emoji = "🚨";
+  else if (warning > 0) emoji = "⚠️";
 
-  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n${sections.join("\n\n")}`;
+  const message = `${emoji} <b>Budget Alert - ${periodName}</b>\n\n${table}`;
 
   return {
     hasAlerts,
-    critical: critical.length,
-    warning: warning.length,
-    watch: watch.length,
-    healthy: healthy.length,
+    critical,
+    warning,
     message,
   };
 }
@@ -189,6 +202,8 @@ async function handleFastCommands(text, chatId) {
 <b>Add Expenses:</b>
 • 90-grocery or 90 grocery
 • 50+30-ai or 100-grocery,ai
+• 6777,90,9,91 grocery (multiple entries)
+• 6777,90+9+91 grocery (mixed)
 • Just type any number (e.g., 150) → goes to "uncategorized"
 
 <b>Basic Commands:</b>
@@ -221,7 +236,6 @@ async function handleFastCommands(text, chatId) {
 
 /* ================= OPTIMIZED SUPABASE LOADERS ================= */
 
-// Load all data in parallel for better performance
 async function loadAllData() {
   const [budgets, expenses, members, settlements] = await Promise.all([
     loadBudgets(),
@@ -247,7 +261,6 @@ async function loadBudgets() {
   const budgets = {};
   (data || []).forEach((r) => (budgets[r.category] = Number(r.budget) || 0));
   
-  // Ensure "uncategorized" exists with a default budget of 0
   if (!budgets["uncategorized"]) {
     budgets["uncategorized"] = 0;
   }
@@ -256,7 +269,6 @@ async function loadBudgets() {
 }
 
 async function saveBudgets(budgets) {
-  // Use UPSERT to update existing or insert new budgets
   const rows = Object.entries(budgets).map(([category, budget]) => ({
     category,
     budget,
@@ -401,7 +413,6 @@ async function updateMember(telegramUserId, updates) {
 }
 
 async function deleteMember(userName) {
-  // Foreign key CASCADE will handle related records
   const { error } = await supabase
     .from("members")
     .delete()
@@ -488,7 +499,6 @@ async function ensureUserExists(telegramUserId, displayName, username) {
   const existing = members.find((m) => m.telegramUserId === telegramUserId);
 
   if (existing) {
-    // Update display name or username if changed
     const needsUpdate =
       existing.displayName !== displayName || existing.username !== username;
     if (needsUpdate) {
@@ -497,11 +507,9 @@ async function ensureUserExists(telegramUserId, displayName, username) {
     return existing.userName;
   }
 
-  // New user - create a unique userName
   const baseUserName = displayName || username || `user${telegramUserId}`;
   let userName = baseUserName.toLowerCase().replace(/\s+/g, "_");
 
-  // Ensure uniqueness
   let counter = 1;
   while (members.some((m) => m.userName === userName)) {
     userName = `${baseUserName.toLowerCase().replace(/\s+/g, "_")}_${counter}`;
@@ -510,7 +518,6 @@ async function ensureUserExists(telegramUserId, displayName, username) {
 
   await saveMembers([{ userName, telegramUserId, displayName, username }]);
 
-  // Also create settlement record
   await saveSettlements([
     {
       userName,
@@ -526,18 +533,15 @@ async function ensureUserExists(telegramUserId, displayName, username) {
 /* ================= EXPENSE PARSER ================= */
 
 function parseExpense(text) {
-  // Remove common words and normalize
   const cleaned = text
     .toLowerCase()
     .replace(/\b(spent|paid|expense|for|on|the|a|an|in|at|to)\b/g, "")
     .trim();
 
-  // Try to find amounts and categories
   const results = [];
-  const seen = new Set(); // Prevent duplicates
-  const usedRanges = []; // Track character ranges already matched
+  const seen = new Set();
+  const usedRanges = [];
 
-  // Helper to check if a range overlaps with already used ranges
   function isRangeUsed(start, end) {
     return usedRanges.some(range => 
       (start >= range.start && start < range.end) ||
@@ -546,111 +550,122 @@ function parseExpense(text) {
     );
   }
 
-  // Pattern 1: number + number - category (90+10-grocery) - CHECK FIRST!
-  const pattern1 =
-    /(\d+(?:\.\d+)?(?:\s*[+]\s*\d+(?:\.\d+)?)*)\s*-\s*([a-z]+)/g;
+  // Pattern 1: Comma and/or plus separated amounts with category - for VALID categories only
+  // This will be validated later, so we just extract the pattern
+  const pattern1 = /([\d+,\s.]+)\s+([a-z]+)/g;
   let match;
   while ((match = pattern1.exec(cleaned)) !== null) {
-    const amountStr = match[1].replace(/\s+/g, "");
-    const amount = amountStr
-      .split("+")
-      .reduce((sum, num) => sum + parseFloat(num), 0);
-    const key = `${amount}-${match[2]}`;
-    if (!seen.has(key)) {
-      results.push({
-        amount,
-        category: match[2],
-      });
-      seen.add(key);
-      // Mark this entire match range as used
-      usedRanges.push({ start: match.index, end: match.index + match[0].length });
-    }
-  }
-
-  // Pattern 2: number-category (90-grocery)
-  const pattern2 = /(\d+(?:\.\d+)?)\s*-\s*([a-z]+)/g;
-  while ((match = pattern2.exec(cleaned)) !== null) {
-    if (!isRangeUsed(match.index, match.index + match[0].length)) {
-      const key = `${match[1]}-${match[2]}`;
-      if (!seen.has(key)) {
-        results.push({
-          amount: parseFloat(match[1]),
-          category: match[2],
-        });
-        seen.add(key);
-        usedRanges.push({ start: match.index, end: match.index + match[0].length });
-      }
-    }
-  }
-
-  // Pattern 3: number + number category (90+10 grocery) - space instead of dash
-  const pattern3 = /(\d+(?:\.\d+)?(?:\s*[+]\s*\d+(?:\.\d+)?)*)\s+([a-z]+)/g;
-  while ((match = pattern3.exec(cleaned)) !== null) {
-    if (!isRangeUsed(match.index, match.index + match[0].length)) {
-      const amountStr = match[1].replace(/\s+/g, "");
-      const amount = amountStr
-        .split("+")
-        .reduce((sum, num) => sum + parseFloat(num), 0);
-      const key = `${amount}-${match[2]}`;
-      if (!seen.has(key)) {
-        results.push({
-          amount,
-          category: match[2],
-        });
-        seen.add(key);
-        usedRanges.push({ start: match.index, end: match.index + match[0].length });
-      }
-    }
-  }
-
-  // Pattern 4: number category (90 grocery) - single number
-  const pattern4 = /(\d+(?:\.\d+)?)\s+([a-z]+)/g;
-  while ((match = pattern4.exec(cleaned)) !== null) {
-    if (!isRangeUsed(match.index, match.index + match[0].length)) {
-      const key = `${match[1]}-${match[2]}`;
-      if (!seen.has(key)) {
-        results.push({
-          amount: parseFloat(match[1]),
-          category: match[2],
-        });
-        seen.add(key);
-        usedRanges.push({ start: match.index, end: match.index + match[0].length });
-      }
-    }
-  }
-
-  // Pattern 5: Multiple categories (90-grocery,ai)
-  const pattern5 = /(\d+(?:\.\d+)?)\s*-\s*([a-z\s,]+)/g;
-  while ((match = pattern5.exec(cleaned)) !== null) {
-    if (!isRangeUsed(match.index, match.index + match[0].length)) {
-      const amount = parseFloat(match[1]);
-      const categories = match[2]
-        .split(",")
-        .map((c) => c.trim())
-        .filter((c) => c);
-
-      categories.forEach((category) => {
-        const key = `${amount}-${category}`;
-        if (!seen.has(key)) {
-          results.push({ amount, category });
-          seen.add(key);
+    const amountsStr = match[1];
+    const category = match[2];
+    
+    if (/[\d,+]/.test(amountsStr)) {
+      const commaParts = amountsStr.split(',').map(p => p.trim()).filter(p => p);
+      
+      commaParts.forEach(part => {
+        if (part.includes('+')) {
+          const amount = part
+            .split('+')
+            .map(n => n.trim())
+            .filter(n => n)
+            .reduce((sum, num) => sum + parseFloat(num), 0);
+          
+          if (!isNaN(amount) && amount > 0) {
+            const key = `${amount}-${category}-${results.length}`;
+            if (!seen.has(key)) {
+              results.push({ amount, category });
+              seen.add(key);
+            }
+          }
+        } else {
+          const amount = parseFloat(part.trim());
+          if (!isNaN(amount) && amount > 0) {
+            const key = `${amount}-${category}-${results.length}`;
+            if (!seen.has(key)) {
+              results.push({ amount, category });
+              seen.add(key);
+            }
+          }
         }
       });
+      
       usedRanges.push({ start: match.index, end: match.index + match[0].length });
     }
   }
 
-  // Pattern 6: Standalone numbers (any number without category)
-  // This will catch numbers that weren't already matched by previous patterns
-  const pattern6 = /\b(\d+(?:\.\d+)?)\b/g;
-  const originalText = text.toLowerCase();
-  while ((match = pattern6.exec(originalText)) !== null) {
+  // Pattern 2: Amounts with dash and category - for formats like 90-grocery, 50+30-ai
+  const pattern2 = /([\d+,\s.]+)\s*-\s*([a-z]+)/g;
+  while ((match = pattern2.exec(cleaned)) !== null) {
+    if (!isRangeUsed(match.index, match.index + match[0].length)) {
+      const amountsStr = match[1];
+      const category = match[2];
+      
+      const commaParts = amountsStr.split(',').map(p => p.trim()).filter(p => p);
+      
+      commaParts.forEach(part => {
+        if (part.includes('+')) {
+          const amount = part
+            .split('+')
+            .map(n => n.trim())
+            .filter(n => n)
+            .reduce((sum, num) => sum + parseFloat(num), 0);
+          
+          if (!isNaN(amount) && amount > 0) {
+            const key = `${amount}-${category}-${results.length}`;
+            if (!seen.has(key)) {
+              results.push({ amount, category });
+              seen.add(key);
+            }
+          }
+        } else {
+          const amount = parseFloat(part.trim());
+          if (!isNaN(amount) && amount > 0) {
+            const key = `${amount}-${category}-${results.length}`;
+            if (!seen.has(key)) {
+              results.push({ amount, category });
+              seen.add(key);
+            }
+          }
+        }
+      });
+      
+      usedRanges.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  // Pattern 3: Amount with multiple categories (90-grocery,ai)
+  const pattern3 = /(\d+(?:\.\d+)?)\s*-\s*([a-z,\s]+)/g;
+  while ((match = pattern3.exec(cleaned)) !== null) {
+    if (!isRangeUsed(match.index, match.index + match[0].length)) {
+      const amount = parseFloat(match[1]);
+      const categoriesStr = match[2];
+      
+      if (categoriesStr.includes(',')) {
+        const categories = categoriesStr
+          .split(',')
+          .map(c => c.trim())
+          .filter(c => c && /^[a-z]+$/.test(c));
+
+        categories.forEach(category => {
+          const key = `${amount}-${category}-${results.length}`;
+          if (!seen.has(key)) {
+            results.push({ amount, category });
+            seen.add(key);
+          }
+        });
+        
+        usedRanges.push({ start: match.index, end: match.index + match[0].length });
+      }
+    }
+  }
+
+  // Pattern 4: Standalone numbers (any number without category OR with invalid category)
+  // This catches numbers anywhere in the text
+  const pattern4 = /\b(\d+(?:\.\d+)?)\b/g;
+  while ((match = pattern4.exec(cleaned)) !== null) {
     const amount = parseFloat(match[1]);
-    // Skip very small numbers (likely not expenses) and very large numbers (likely phone numbers, etc)
     if (amount >= 1 && amount <= 100000) {
       if (!isRangeUsed(match.index, match.index + match[0].length)) {
-        const key = `${amount}-uncategorized`;
-        // Only add if this exact amount hasn't been categorized already
+        const key = `${amount}-uncategorized-${results.length}`;
         const alreadyCategorized = results.some(r => r.amount === amount);
         
         if (!seen.has(key) && !alreadyCategorized) {
@@ -674,16 +689,13 @@ function calculateBudgetProgress(category, budgets, expenses) {
   const dailyBudget = monthlyBudget / 30;
   const weeklyBudget = (monthlyBudget * 7) / 30;
 
-  // Get current date info
   const nowDate = new Date();
   const currentDay = nowDate.getDate();
   const currentMonth = nowDate.getMonth();
   const currentYear = nowDate.getFullYear();
 
-  // Get start of today
   const startOfToday = new Date(currentYear, currentMonth, currentDay);
 
-  // Get start of this week (Monday)
   const dayOfWeek = nowDate.getDay();
   const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
   const startOfWeek = new Date(
@@ -692,15 +704,12 @@ function calculateBudgetProgress(category, budgets, expenses) {
     currentDay - daysToMonday
   );
 
-  // Get start of this month
   const startOfMonth = new Date(currentYear, currentMonth, 1);
 
-  // Filter expenses by category and time period
   const categoryExpenses = expenses.filter(
     (e) => e.category === category && !e.discarded
   );
 
-  // Calculate spent amounts
   const spentToday = categoryExpenses
     .filter((e) => new Date(e.ts) >= startOfToday)
     .reduce((sum, e) => sum + e.amount, 0);
@@ -713,7 +722,6 @@ function calculateBudgetProgress(category, budgets, expenses) {
     .filter((e) => new Date(e.ts) >= startOfMonth)
     .reduce((sum, e) => sum + e.amount, 0);
 
-  // Calculate percentages
   const dailyPercent = dailyBudget > 0 ? ((spentToday / dailyBudget) * 100).toFixed(0) : 0;
   const weeklyPercent = weeklyBudget > 0 ? ((spentThisWeek / weeklyBudget) * 100).toFixed(0) : 0;
   const monthlyPercent = monthlyBudget > 0 ? ((spentThisMonth / monthlyBudget) * 100).toFixed(0) : 0;
@@ -735,12 +743,10 @@ function calculateBudgetProgress(category, budgets, expenses) {
 
 export default async function handler(req, res) {
   try {
-    // Handle Vercel's serverless function format
     if (req.method !== "POST") {
       return res.status(405).send("Method not allowed");
     }
 
-    // Vercel automatically parses JSON into req.body
     const update = req.body;
     const message = update?.message;
 
@@ -755,22 +761,17 @@ export default async function handler(req, res) {
     const username = message.from.username || "";
     const messageId = message.message_id;
 
-    // Ensure user exists in database
     const userName = await ensureUserExists(
       telegramUserId,
       displayName,
       username
     );
 
-    // Handle fast commands (no DB load needed)
     if (await handleFastCommands(text, chatId)) {
       return res.status(200).send("OK");
     }
 
-    // Load all data for other commands (optimized with Promise.all)
     const data = await loadAllData();
-    
-    // Ensure uncategorized category exists
     data.budgets = await ensureUncategorizedExists(data.budgets);
 
     /* ================= CATEGORIES COMMAND ================= */
@@ -788,12 +789,12 @@ Add one with:
         return res.status(200).send("OK");
       }
 
-      const lines = categories.map(
-        ([cat, budget]) => `• ${cat}: ₹${budget}`
-      );
+      const tableRows = categories.map(([cat, budget]) => [cat, `₹${budget}`]);
+      const table = createTable(['Category', 'Budget'], tableRows);
+
       await sendMessage(
         chatId,
-        `📂 <b>Categories</b>\n\n${lines.join("\n")}\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
+        `📂 <b>Categories</b>\n\n${table}\n\n<i>Note: "uncategorized" is a default category for expenses without a category.</i>`
       );
       return res.status(200).send("OK");
     }
@@ -914,7 +915,6 @@ Example: /deletecategory ai`
 
       const cat = parts[1];
       
-      // Prevent deletion of uncategorized
       if (cat === "uncategorized") {
         await sendMessage(
           chatId,
@@ -936,7 +936,6 @@ Use /categories to see available categories.`
         return res.status(200).send("OK");
       }
 
-      // Check if category has expenses (including discarded ones due to FK constraint)
       const hasExpenses = data.expenses.some((e) => e.category === cat);
 
       if (hasExpenses) {
@@ -954,7 +953,6 @@ To delete this category:
         return res.status(200).send("OK");
       }
 
-      // Delete from database directly
       const { error } = await supabase
         .from("budgets")
         .delete()
@@ -988,14 +986,16 @@ Members are added automatically when they interact with the bot.`
         return res.status(200).send("OK");
       }
 
-      const lines = data.members.map((m) => {
-        const name = m.displayName || m.username || m.userName;
-        return `• ${escapeHtml(name)}`;
-      });
+      const tableRows = data.members.map((m, idx) => [
+        String(idx + 1),
+        m.displayName || m.username || m.userName
+      ]);
+      
+      const table = createTable(['#', 'Name'], tableRows);
 
       await sendMessage(
         chatId,
-        `👥 <b>Registered Members</b>\n\n${lines.join("\n")}\n\n<i>Total: ${data.members.length}</i>`
+        `👥 <b>Registered Members</b>\n\n${table}\n\n<i>Total: ${data.members.length}</i>`
       );
       return res.status(200).send("OK");
     }
@@ -1028,7 +1028,6 @@ Example: /addmember John`
         return res.status(200).send("OK");
       }
 
-      // Create member without telegram_user_id (manual addition)
       await saveMembers([
         {
           userName: newUserName,
@@ -1038,7 +1037,6 @@ Example: /addmember John`
         },
       ]);
 
-      // Create settlement record
       await saveSettlements([
         {
           userName: newUserName,
@@ -1112,7 +1110,7 @@ Use /addcategory to create categories first.`
       }
 
       const activeExpenses = data.expenses.filter((e) => !e.discarded);
-      const lines = [];
+      const tableRows = [];
 
       for (const cat of categories) {
         const spent = activeExpenses
@@ -1120,15 +1118,25 @@ Use /addcategory to create categories first.`
           .reduce((sum, e) => sum + e.amount, 0);
         const budget = data.budgets[cat];
         const remaining = budget - spent;
-        const percent = budget > 0 ? ((spent / budget) * 100).toFixed(1) : 0;
+        const percent = budget > 0 ? ((spent / budget) * 100).toFixed(0) : 0;
 
         const status = remaining >= 0 ? "✅" : "⚠️";
-        lines.push(
-          `${status} <b>${cat}</b>: ₹${spent.toFixed(0)}/₹${budget} (${percent}%)\n   Left: ₹${remaining.toFixed(0)}`
-        );
+        tableRows.push([
+          status,
+          cat.substring(0, 12),
+          `₹${spent.toFixed(0)}`,
+          `₹${budget}`,
+          `${percent}%`,
+          `₹${remaining.toFixed(0)}`
+        ]);
       }
 
-      await sendMessage(chatId, `📊 <b>Summary</b>\n\n${lines.join("\n\n")}`);
+      const table = createTable(
+        ['', 'Category', 'Spent', 'Budget', '%', 'Left'],
+        tableRows
+      );
+
+      await sendMessage(chatId, `📊 <b>Summary</b>\n\n${table}`);
       return res.status(200).send("OK");
     }
 
@@ -1156,7 +1164,6 @@ No expenses recorded yet.`
         return res.status(200).send("OK");
       }
 
-      // Calculate total spent by each user
       const userTotals = {};
       data.members.forEach((m) => {
         userTotals[m.userName] = 0;
@@ -1174,13 +1181,11 @@ No expenses recorded yet.`
       );
       const perPerson = totalSpent / data.members.length;
 
-      // Calculate balances
       const balances = {};
       data.members.forEach((m) => {
         balances[m.userName] = userTotals[m.userName] - perPerson;
       });
 
-      // Separate creditors and debtors
       const creditors = [];
       const debtors = [];
 
@@ -1203,7 +1208,6 @@ Per person: ₹${perPerson.toFixed(2)}`
         return res.status(200).send("OK");
       }
 
-      // Calculate settlements
       const settlements = [];
       creditors.sort((a, b) => b.amount - a.amount);
       debtors.sort((a, b) => b.amount - a.amount);
@@ -1222,9 +1226,12 @@ Per person: ₹${perPerson.toFixed(2)}`
           data.members.find((m) => m.userName === debtor.userName)
             ?.displayName || debtor.userName;
 
-        settlements.push(
-          `${escapeHtml(debtorName)} → ${escapeHtml(creditorName)}: <b>₹${amount.toFixed(2)}</b>`
-        );
+        settlements.push([
+          debtorName.substring(0, 12),
+          '→',
+          creditorName.substring(0, 12),
+          `₹${amount.toFixed(0)}`
+        ]);
 
         creditor.amount -= amount;
         debtor.amount -= amount;
@@ -1233,13 +1240,19 @@ Per person: ₹${perPerson.toFixed(2)}`
         if (debtor.amount < 0.01) j++;
       }
 
-      const lines = [
-        `<b>Total:</b> ₹${totalSpent.toFixed(2)} • <b>Per person:</b> ₹${perPerson.toFixed(2)}`,
-        "",
-        ...settlements,
-      ];
+      const table = createTable(
+        ['From', '', 'To', 'Amount'],
+        settlements
+      );
 
-      await sendMessage(chatId, `💸 <b>Settlements</b>\n\n${lines.join("\n")}`);
+      await sendMessage(
+        chatId,
+        `💸 <b>Settlements</b>
+
+<b>Total:</b> ₹${totalSpent.toFixed(2)} • <b>Per person:</b> ₹${perPerson.toFixed(2)}
+
+${table}`
+      );
       return res.status(200).send("OK");
     }
 
@@ -1271,22 +1284,18 @@ Last settled: ${formatDate(userSettlement.lastSettledDate)}`
         return res.status(200).send("OK");
       }
 
-      // Mark user as settled
       await updateSettlement(userName, {
         settled: true,
         lastSettledDate: now(),
         telegramUserId,
       });
 
-      // Refresh settlements
       const updatedSettlements = await loadSettlements();
       const allSettled = updatedSettlements.every((s) => s.settled);
 
       if (allSettled) {
-        // Reset everything
         await resetSettlements();
 
-        // Mark all expenses as discarded
         const activeExpenses = data.expenses.filter((e) => !e.discarded);
         for (const expense of activeExpenses) {
           await updateExpense(expense.id, { discarded: true });
@@ -1347,7 +1356,6 @@ Expense not found or already reverted.`
         return res.status(200).send("OK");
       }
 
-      // Mark as discarded
       await updateExpense(expense.id, { discarded: true });
 
       await sendMessage(
@@ -1363,30 +1371,28 @@ Expense not found or already reverted.`
 
     /* ================= EXPENSE PARSER ================= */
 
-    // Try to parse as expense
     const parsedExpenses = parseExpense(text);
 
     if (parsedExpenses.length > 0) {
       const validExpenses = [];
-      const errors = [];
 
       for (const exp of parsedExpenses) {
-        // Allow "uncategorized" category to pass through
+        // If category exists in budgets, use it; otherwise convert to uncategorized
         if (exp.category === "uncategorized" || data.budgets[exp.category]) {
           validExpenses.push(exp);
         } else {
-          errors.push(
-            `❌ "${exp.category}" - category doesn't exist. Use /categories to see available categories.`
-          );
+          // Convert invalid category to uncategorized
+          validExpenses.push({
+            amount: exp.amount,
+            category: "uncategorized"
+          });
         }
       }
 
       if (validExpenses.length === 0) {
-        await sendMessage(chatId, errors.join("\n\n"));
         return res.status(200).send("OK");
       }
 
-      // Save valid expenses
       const newExpenses = validExpenses.map((exp) => ({
         telegramUserId,
         userName,
@@ -1400,13 +1406,11 @@ Expense not found or already reverted.`
 
       await saveExpenses(newExpenses);
 
-      // Calculate budget progress for each category
       const budgetLines = [];
       const uniqueCategories = [
         ...new Set(validExpenses.map((e) => e.category)),
       ];
 
-      // Reload expenses to include the new ones
       const updatedExpenses = await loadExpenses();
 
       for (const category of uniqueCategories) {
@@ -1424,7 +1428,6 @@ Expense not found or already reverted.`
         );
       }
 
-      // Send confirmation
       const lines = validExpenses.map(
         (exp) => `₹${exp.amount} - ${exp.category}`
       );
@@ -1433,10 +1436,6 @@ Expense not found or already reverted.`
 
       if (budgetLines.length > 0) {
         response += `\n\n${budgetLines.join("\n")}`;
-      }
-
-      if (errors.length > 0) {
-        response += "\n\n" + errors.join("\n\n");
       }
 
       await sendMessage(chatId, response, messageId);
@@ -1457,20 +1456,17 @@ Expense not found or already reverted.`
       const total = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
       const avgPerExpense = total / activeExpenses.length;
 
-      // Group by user
       const byUser = {};
       activeExpenses.forEach((e) => {
         if (!byUser[e.userName]) byUser[e.userName] = 0;
         byUser[e.userName] += e.amount;
       });
 
-      // Top spender
       const topSpender = Object.entries(byUser).sort((a, b) => b[1] - a[1])[0];
       const topSpenderName =
         data.members.find((m) => m.userName === topSpender[0])?.displayName ||
         topSpender[0];
 
-      // Group by category
       const byCategory = {};
       activeExpenses.forEach((e) => {
         if (!byCategory[e.category]) byCategory[e.category] = 0;
@@ -1514,16 +1510,18 @@ Expense not found or already reverted.`
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5);
 
-      const lines = sorted.map(([userName, amount], idx) => {
+      const tableRows = sorted.map(([userName, amount], idx) => {
         const name =
           data.members.find((m) => m.userName === userName)?.displayName ||
           userName;
         const medal =
-          idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : "  ";
-        return `${medal} ${escapeHtml(name)}: <b>₹${amount.toFixed(2)}</b>`;
+          idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `${idx + 1}`;
+        return [medal, name.substring(0, 15), `₹${amount.toFixed(0)}`];
       });
 
-      await sendMessage(chatId, `🏆 <b>Top Spenders</b>\n\n${lines.join("\n")}`);
+      const table = createTable(['', 'Name', 'Amount'], tableRows);
+
+      await sendMessage(chatId, `🏆 <b>Top Spenders</b>\n\n${table}`);
       return res.status(200).send("OK");
     }
 
@@ -1556,18 +1554,20 @@ Expense not found or already reverted.`
       });
 
       const monthName = now.toLocaleString("default", { month: "long" });
-      const lines = Object.entries(byCategory)
+      
+      const tableRows = Object.entries(byCategory)
         .sort((a, b) => b[1] - a[1])
-        .map(([cat, amount]) => `${cat}: <b>₹${amount.toFixed(2)}</b>`);
+        .map(([cat, amount]) => [cat.substring(0, 12), `₹${amount.toFixed(0)}`]);
+
+      const table = createTable(['Category', 'Amount'], tableRows);
 
       await sendMessage(
         chatId,
         `📅 <b>${monthName} ${currentYear}</b>
 
-<b>Total:</b> ₹${total.toFixed(2)}
-<b>Expenses:</b> ${monthlyExpenses.length}
+<b>Total:</b> ₹${total.toFixed(2)} • <b>Expenses:</b> ${monthlyExpenses.length}
 
-${lines.join("\n")}`
+${table}`
       );
       return res.status(200).send("OK");
     }
@@ -1597,23 +1597,25 @@ ${lines.join("\n")}`
         return res.status(200).send("OK");
       }
 
-      const lines = results.slice(0, 10).map((e) => {
+      const tableRows = results.slice(0, 10).map((e) => {
         const date = new Date(e.ts).toLocaleDateString("en-IN", {
-          day: "numeric",
+          day: "2-digit",
           month: "short",
           timeZone: "Asia/Kolkata",
         });
         const name =
           data.members.find((m) => m.userName === e.userName)?.displayName ||
           e.userName;
-        return `${date} • ${escapeHtml(name)} • <b>₹${e.amount}</b> - ${e.category}`;
+        return [date, name.substring(0, 10), `₹${e.amount}`, e.category.substring(0, 10)];
       });
 
+      const table = createTable(['Date', 'User', 'Amount', 'Category'], tableRows);
+
       const more =
-        results.length > 10 ? `\n\n<i>+${results.length - 10} more</i>` : "";
+        results.length > 10 ? `\n\n<i>+${results.length - 10} more results</i>` : "";
       await sendMessage(
         chatId,
-        `🔍 <b>Results (${results.length})</b>\n\n${lines.join("\n")}${more}`
+        `🔍 <b>Search Results (${results.length})</b>\n\n${table}${more}`
       );
       return res.status(200).send("OK");
     }
@@ -1633,9 +1635,9 @@ ${lines.join("\n")}`
         return res.status(200).send("OK");
       }
 
-      const lines = recent.map((e) => {
+      const tableRows = recent.map((e) => {
         const date = new Date(e.ts).toLocaleDateString("en-IN", {
-          day: "numeric",
+          day: "2-digit",
           month: "short",
           hour: "2-digit",
           minute: "2-digit",
@@ -1644,12 +1646,14 @@ ${lines.join("\n")}`
         const name =
           data.members.find((m) => m.userName === e.userName)?.displayName ||
           e.userName;
-        return `${date} • ${escapeHtml(name)}\n<b>₹${e.amount}</b> - ${e.category}`;
+        return [date, name.substring(0, 10), `₹${e.amount}`, e.category.substring(0, 10)];
       });
+
+      const table = createTable(['Date', 'User', 'Amount', 'Category'], tableRows);
 
       await sendMessage(
         chatId,
-        `📝 <b>Last ${recent.length}</b>\n\n${lines.join("\n\n")}`
+        `📝 <b>Last ${recent.length} Expenses</b>\n\n${table}`
       );
       return res.status(200).send("OK");
     }
@@ -1663,7 +1667,6 @@ ${lines.join("\n")}`
         return res.status(200).send("OK");
       }
 
-      // Mark all as discarded
       for (const expense of data.expenses) {
         if (!expense.discarded) {
           await updateExpense(expense.id, { discarded: true });
@@ -1684,13 +1687,9 @@ ${lines.join("\n")}`
       return res.status(200).send("OK");
     }
 
-    // If no command matched and not an expense, ignore
     return res.status(200).send("OK");
   } catch (err) {
-    // Never throw — only log
     console.error("Webhook error:", err);
-    // Optionally send error to admin chat
-    // await sendMessage(ADMIN_CHAT_ID, `⚠️ Error: ${err.message}`);
     return res.status(200).send("OK");
   }
 }

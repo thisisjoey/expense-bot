@@ -467,15 +467,20 @@ Examples: 90-grocery, 90 grocery
 
 // ================= WEBHOOK HANDLER =================
 export default async function handler(req, res) {
+  console.log('Webhook received:', req.method);
+  
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true });
   }
   
   try {
     const update = req.body;
+    console.log('Update:', JSON.stringify(update));
+    
     const msg = update.message || update.edited_message;
     
     if (!msg || !msg.text) {
+      console.log('No message or text');
       return res.status(200).json({ ok: true });
     }
     
@@ -484,11 +489,15 @@ export default async function handler(req, res) {
     const text = msg.text.trim();
     const messageId = msg.message_id;
     
-    handleCommand(chatId, user, text, messageId).catch(err => console.error(err));
+    console.log('Processing:', { chatId, user, text });
+    
+    handleCommand(chatId, user, text, messageId).catch(err => {
+      console.error('Command error:', err);
+    });
     
     return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error('Error:', err);
+    console.error('Handler error:', err);
     return res.status(200).json({ ok: true });
   }
 }

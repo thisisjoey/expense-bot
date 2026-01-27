@@ -166,57 +166,44 @@ async function generateDailySummary() {
   const monthStatus = getStatusEmoji(monthPercent);
   const monthStatusText = getStatusText(monthPercent);
 
-  // Build the message
-  const message = `🌙 <b>Daily Summary - ${nowIST.toLocaleDateString("en-IN", { 
+  // Build the message with two beautiful sections
+  const message = `🌙 <b>Daily Summary</b>
+${nowIST.toLocaleDateString("en-IN", { 
     day: "numeric", 
     month: "long", 
     year: "numeric",
     timeZone: "Asia/Kolkata"
-  })}</b>
+  })}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃   <b>📊 CURRENT TRACKING</b>    ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 📅 <b>Today</b>
-   ₹${todaySpent.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)}
-   ${todayPercent.toFixed(1)}% • ${todayStatus} ${todayStatusText}
+₹${todaySpent.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)} • ${todayPercent.toFixed(1)}%
+${todayStatus} <i>${todayStatusText}</i>
 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-📊 <b>Daily Average (This Month)</b>
-   ₹${dailyAverage.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)}
-   ${dailyAvgPercent.toFixed(1)}% • ${dailyAvgStatus} ${dailyAvgStatusText}
-   <i>(${daysPassedThisMonth} days elapsed)</i>
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+📊 <b>Daily Average</b> <i>(${daysPassedThisMonth} days)</i>
+₹${dailyAverage.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)} • ${dailyAvgPercent.toFixed(1)}%
+${dailyAvgStatus} <i>${dailyAvgStatusText}</i>
 
 📈 <b>This Week</b>
-   ₹${weekSpent.toFixed(0)} / ₹${totalWeeklyBudget.toFixed(0)}
-   ${weekPercent.toFixed(1)}% • ${weekStatus} ${weekStatusText}
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+₹${weekSpent.toFixed(0)} / ₹${totalWeeklyBudget.toFixed(0)} • ${weekPercent.toFixed(1)}%
+${weekStatus} <i>${weekStatusText}</i>
 
 📆 <b>This Month</b>
-   ₹${monthSpent.toFixed(0)} / ₹${totalMonthlyBudget}
-   ${monthPercent.toFixed(1)}% • ${monthStatus} ${monthStatusText}
+₹${monthSpent.toFixed(0)} / ₹${totalMonthlyBudget} • ${monthPercent.toFixed(1)}%
+${monthStatus} <i>${monthStatusText}</i>
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+┏━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃   <b>📜 RETROSPECTIVE</b>       ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
 🔙 <b>Yesterday</b>
-   ₹${yesterdaySpent.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)}
-   ${yesterdayPercent.toFixed(1)}% • ${yesterdayStatus} ${yesterdayStatusText}
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+₹${yesterdaySpent.toFixed(0)} / ₹${totalDailyBudget.toFixed(0)} • ${yesterdayPercent.toFixed(1)}%
+${yesterdayStatus} <i>${yesterdayStatusText}</i>
 
 💡 <i>Keep tracking your expenses!</i>`;
 

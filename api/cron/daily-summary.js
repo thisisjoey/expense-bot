@@ -94,8 +94,9 @@ async function generateDailySummary() {
   const totalDailyBudget = totalMonthlyBudget / 30;
   const totalWeeklyBudget = (totalMonthlyBudget * 7) / 30;
 
-  // Get date boundaries
-  const nowIST = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  // Get date boundaries - properly convert to IST
+  const nowUTC = new Date();
+  const nowIST = new Date(nowUTC.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
   const currentDay = nowIST.getDate();
   const currentMonth = nowIST.getMonth();
   const currentYear = nowIST.getFullYear();
@@ -171,8 +172,7 @@ async function generateDailySummary() {
 ${nowIST.toLocaleDateString("en-IN", { 
     day: "numeric", 
     month: "long", 
-    year: "numeric",
-    timeZone: "Asia/Kolkata"
+    year: "numeric"
   })}
 
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -214,27 +214,36 @@ ${yesterdayStatus} <i>${yesterdayStatusText}</i>
 
 export default async function handler(req, res) {
   try {
+    const executionTime = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+    console.log(`[CRON] Execution started at: ${executionTime}`);
+    
     // Verify this is called by Vercel Cron (security check)
     if (req.headers["authorization"] !== `Bearer ${process.env.CRON_SECRET}`) {
+      console.log("[CRON] Unauthorized access attempt");
       return res.status(401).json({ error: "Unauthorized" });
     }
 
     if (!CHAT_ID) {
-      console.error("TELEGRAM_CHAT_ID not configured");
+      console.error("[CRON] TELEGRAM_CHAT_ID not configured");
       return res.status(500).json({ error: "Chat ID not configured" });
     }
 
+    console.log(`[CRON] Generating summary for chat: ${CHAT_ID}`);
+    
     // Generate and send the summary
     const summary = await generateDailySummary();
     await sendMessage(CHAT_ID, summary);
 
+    console.log(`[CRON] Daily summary sent successfully at ${executionTime}`);
+    
     return res.status(200).json({ 
       success: true, 
       message: "Daily summary sent",
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      executionTimeIST: executionTime
     });
   } catch (error) {
-    console.error("Cron job error:", error);
+    console.error("[CRON] Error:", error);
     return res.status(500).json({ 
       error: "Failed to send daily summary",
       details: error.message 

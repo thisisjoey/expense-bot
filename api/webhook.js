@@ -1447,13 +1447,13 @@ Expense not found or already reverted.`
       const totalDailyBudget = totalMonthlyBudget / 30;
       const totalWeeklyBudget = (totalMonthlyBudget * 7) / 30;
 
-      const now = new Date();
-      const currentDay = now.getDate();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
+      const currentDate = new Date();
+      const currentDay = currentDate.getDate();
+      const currentMonth = currentDate.getMonth();
+      const currentYear = currentDate.getFullYear();
       
       const todayStart = new Date(currentYear, currentMonth, currentDay);
-      const weekStart = new Date(currentYear, currentMonth, currentDay - (now.getDay() === 0 ? 6 : now.getDay() - 1));
+      const weekStart = new Date(currentYear, currentMonth, currentDay - (currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1));
       const monthStart = new Date(currentYear, currentMonth, 1);
 
       const todaySpent = updatedExpenses

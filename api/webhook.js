@@ -535,25 +535,22 @@ function parseExpense(text) {
   // Try to find amounts and categories
   const results = [];
   const seen = new Set(); // Prevent duplicates
+  const usedRanges = []; // Track character ranges already matched
 
-  // Pattern 1: number-category (90-grocery)
-  const pattern1 = /(\d+(?:\.\d+)?)\s*-\s*([a-z]+)/g;
-  let match;
-  while ((match = pattern1.exec(cleaned)) !== null) {
-    const key = `${match[1]}-${match[2]}`;
-    if (!seen.has(key)) {
-      results.push({
-        amount: parseFloat(match[1]),
-        category: match[2],
-      });
-      seen.add(key);
-    }
+  // Helper to check if a range overlaps with already used ranges
+  function isRangeUsed(start, end) {
+    return usedRanges.some(range => 
+      (start >= range.start && start < range.end) ||
+      (end > range.start && end <= range.end) ||
+      (start <= range.start && end >= range.end)
+    );
   }
 
-  // Pattern 2: number + number - category (90+10-grocery)
-  const pattern2 =
+  // Pattern 1: number + number - category (90+10-grocery) - CHECK FIRST!
+  const pattern1 =
     /(\d+(?:\.\d+)?(?:\s*[+]\s*\d+(?:\.\d+)?)*)\s*-\s*([a-z]+)/g;
-  while ((match = pattern2.exec(cleaned)) !== null) {
+  let match;
+  while ((match = pattern1.exec(cleaned)) !== null) {
     const amountStr = match[1].replace(/\s+/g, "");
     const amount = amountStr
       .split("+")
@@ -565,57 +562,104 @@ function parseExpense(text) {
         category: match[2],
       });
       seen.add(key);
+      // Mark this entire match range as used
+      usedRanges.push({ start: match.index, end: match.index + match[0].length });
     }
   }
 
-  // Pattern 3: number category (90 grocery)
-  const pattern3 = /(\d+(?:\.\d+)?)\s+([a-z]+)/g;
-  while ((match = pattern3.exec(cleaned)) !== null) {
-    const key = `${match[1]}-${match[2]}`;
-    if (!seen.has(key)) {
-      results.push({
-        amount: parseFloat(match[1]),
-        category: match[2],
-      });
-      seen.add(key);
-    }
-  }
-
-  // Pattern 4: Multiple categories (90-grocery,ai)
-  const pattern4 = /(\d+(?:\.\d+)?)\s*-\s*([a-z\s,]+)/g;
-  while ((match = pattern4.exec(cleaned)) !== null) {
-    const amount = parseFloat(match[1]);
-    const categories = match[2]
-      .split(",")
-      .map((c) => c.trim())
-      .filter((c) => c);
-
-    categories.forEach((category) => {
-      const key = `${amount}-${category}`;
+  // Pattern 2: number-category (90-grocery)
+  const pattern2 = /(\d+(?:\.\d+)?)\s*-\s*([a-z]+)/g;
+  while ((match = pattern2.exec(cleaned)) !== null) {
+    if (!isRangeUsed(match.index, match.index + match[0].length)) {
+      const key = `${match[1]}-${match[2]}`;
       if (!seen.has(key)) {
-        results.push({ amount, category });
+        results.push({
+          amount: parseFloat(match[1]),
+          category: match[2],
+        });
         seen.add(key);
+        usedRanges.push({ start: match.index, end: match.index + match[0].length });
       }
-    });
+    }
   }
 
-  // Pattern 5: Standalone numbers (any number without category)
+  // Pattern 3: number + number category (90+10 grocery) - space instead of dash
+  const pattern3 = /(\d+(?:\.\d+)?(?:\s*[+]\s*\d+(?:\.\d+)?)*)\s+([a-z]+)/g;
+  while ((match = pattern3.exec(cleaned)) !== null) {
+    if (!isRangeUsed(match.index, match.index + match[0].length)) {
+      const amountStr = match[1].replace(/\s+/g, "");
+      const amount = amountStr
+        .split("+")
+        .reduce((sum, num) => sum + parseFloat(num), 0);
+      const key = `${amount}-${match[2]}`;
+      if (!seen.has(key)) {
+        results.push({
+          amount,
+          category: match[2],
+        });
+        seen.add(key);
+        usedRanges.push({ start: match.index, end: match.index + match[0].length });
+      }
+    }
+  }
+
+  // Pattern 4: number category (90 grocery) - single number
+  const pattern4 = /(\d+(?:\.\d+)?)\s+([a-z]+)/g;
+  while ((match = pattern4.exec(cleaned)) !== null) {
+    if (!isRangeUsed(match.index, match.index + match[0].length)) {
+      const key = `${match[1]}-${match[2]}`;
+      if (!seen.has(key)) {
+        results.push({
+          amount: parseFloat(match[1]),
+          category: match[2],
+        });
+        seen.add(key);
+        usedRanges.push({ start: match.index, end: match.index + match[0].length });
+      }
+    }
+  }
+
+  // Pattern 5: Multiple categories (90-grocery,ai)
+  const pattern5 = /(\d+(?:\.\d+)?)\s*-\s*([a-z\s,]+)/g;
+  while ((match = pattern5.exec(cleaned)) !== null) {
+    if (!isRangeUsed(match.index, match.index + match[0].length)) {
+      const amount = parseFloat(match[1]);
+      const categories = match[2]
+        .split(",")
+        .map((c) => c.trim())
+        .filter((c) => c);
+
+      categories.forEach((category) => {
+        const key = `${amount}-${category}`;
+        if (!seen.has(key)) {
+          results.push({ amount, category });
+          seen.add(key);
+        }
+      });
+      usedRanges.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  // Pattern 6: Standalone numbers (any number without category)
   // This will catch numbers that weren't already matched by previous patterns
-  const pattern5 = /\b(\d+(?:\.\d+)?)\b/g;
+  const pattern6 = /\b(\d+(?:\.\d+)?)\b/g;
   const originalText = text.toLowerCase();
-  while ((match = pattern5.exec(originalText)) !== null) {
+  while ((match = pattern6.exec(originalText)) !== null) {
     const amount = parseFloat(match[1]);
     // Skip very small numbers (likely not expenses) and very large numbers (likely phone numbers, etc)
     if (amount >= 1 && amount <= 100000) {
-      const key = `${amount}-uncategorized`;
-      // Only add if this exact amount hasn't been categorized already
-      const alreadyCategorized = results.some(r => r.amount === amount);
-      if (!seen.has(key) && !alreadyCategorized) {
-        results.push({
-          amount: amount,
-          category: "uncategorized",
-        });
-        seen.add(key);
+      if (!isRangeUsed(match.index, match.index + match[0].length)) {
+        const key = `${amount}-uncategorized`;
+        // Only add if this exact amount hasn't been categorized already
+        const alreadyCategorized = results.some(r => r.amount === amount);
+        
+        if (!seen.has(key) && !alreadyCategorized) {
+          results.push({
+            amount: amount,
+            category: "uncategorized",
+          });
+          seen.add(key);
+        }
       }
     }
   }

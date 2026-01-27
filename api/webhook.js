@@ -1442,6 +1442,41 @@ Expense not found or already reverted.`
       // Reload expenses to include the new ones
       const updatedExpenses = await loadExpenses();
 
+      // Calculate overall budget progress
+      const totalMonthlyBudget = Object.values(data.budgets).reduce((sum, b) => sum + b, 0);
+      const totalDailyBudget = totalMonthlyBudget / 30;
+      const totalWeeklyBudget = (totalMonthlyBudget * 7) / 30;
+
+      const now = new Date();
+      const currentDay = now.getDate();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      
+      const todayStart = new Date(currentYear, currentMonth, currentDay);
+      const weekStart = new Date(currentYear, currentMonth, currentDay - (now.getDay() === 0 ? 6 : now.getDay() - 1));
+      const monthStart = new Date(currentYear, currentMonth, 1);
+
+      const todaySpent = updatedExpenses
+        .filter((e) => !e.discarded && new Date(e.ts) >= todayStart)
+        .reduce((sum, e) => sum + e.amount, 0);
+      const weekSpent = updatedExpenses
+        .filter((e) => !e.discarded && new Date(e.ts) >= weekStart)
+        .reduce((sum, e) => sum + e.amount, 0);
+      const monthSpent = updatedExpenses
+        .filter((e) => !e.discarded && new Date(e.ts) >= monthStart)
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const todayPercent = totalDailyBudget > 0 ? ((todaySpent / totalDailyBudget) * 100).toFixed(0) : 0;
+      const weekPercent = totalWeeklyBudget > 0 ? ((weekSpent / totalWeeklyBudget) * 100).toFixed(0) : 0;
+      const monthPercent = totalMonthlyBudget > 0 ? ((monthSpent / totalMonthlyBudget) * 100).toFixed(0) : 0;
+
+      budgetLines.push(
+        `<b>💼 Overall Budget:</b>`,
+        `Today: ₹${todaySpent.toFixed(0)}/₹${totalDailyBudget.toFixed(0)} (${todayPercent}%)`,
+        `Week: ₹${weekSpent.toFixed(0)}/₹${totalWeeklyBudget.toFixed(0)} (${weekPercent}%)`,
+        `Month: ₹${monthSpent.toFixed(0)}/₹${totalMonthlyBudget.toFixed(0)} (${monthPercent}%)`
+      );
+
       for (const category of uniqueCategories) {
         const progress = calculateBudgetProgress(
           category,
@@ -1450,6 +1485,7 @@ Expense not found or already reverted.`
         );
 
         budgetLines.push(
+          ``,
           `<b>${category}:</b>`,
           `Today: ₹${progress.spentToday.toFixed(0)}/₹${progress.dailyBudget.toFixed(0)} (${progress.dailyPercent}%)`,
           `Week: ₹${progress.spentThisWeek.toFixed(0)}/₹${progress.weeklyBudget.toFixed(0)} (${progress.weeklyPercent}%)`,

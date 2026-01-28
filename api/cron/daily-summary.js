@@ -195,7 +195,7 @@ ${weekStatus} <i>${weekStatusText}</i>
 ₹${monthSpent.toFixed(0)} / ₹${totalMonthlyBudget} • ${monthPercent.toFixed(1)}%
 ${monthStatus} <i>${monthStatusText}</i>
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━
 
 ┏━━━━━━━━━━━━━━┓
 ┃   <b>📜 RETROSPECTIVE</b>       ┃

@@ -553,6 +553,11 @@ async function ensureUserExists(telegramUserId, displayName, username) {
 /* ================= EXPENSE PARSER ================= */
 
 function parseExpense(text) {
+  // Defensive check: Never parse commands (anything starting with /)
+  if (text.trim().startsWith("/")) {
+    return [];
+  }
+  
   // Remove common words and normalize
   const cleaned = text
     .toLowerCase()
@@ -1723,7 +1728,7 @@ Expense not found or already reverted.`
         byCategory[e.category] += e.amount;
       });
 
-      const monthName = now.toLocaleString("default", { month: "long" });
+      const monthName = nowIST.toLocaleString("default", { month: "long" });
       const lines = Object.entries(byCategory)
         .sort((a, b) => b[1] - a[1])
         .map(([cat, amount]) => `• <b>${cat}</b>\n   ₹${amount.toFixed(2)}`);
@@ -1829,13 +1834,7 @@ Expense not found or already reverted.`
         ``,
         `📈 Last Month (Planned vs Consumed):`,
         `   ₹${lastMonthSpent.toFixed(0)} / ₹${totalMonthlyBudget} (${lastMonthPercent}%)`,
-      
-      `${"─".repeat(8)}`,
-        ``,
-        ``,
-        ``,
-        ``
-        ];
+      ];
       // Build category-wise sections
       const categoryLines = [];
       for (const cat of categories) {
@@ -1870,13 +1869,11 @@ Expense not found or already reverted.`
           `   Today: ₹${catTodaySpent.toFixed(0)} / ₹${dailyBudget.toFixed(0)} (${catTodayPercent}%)`,
           `   Week: ₹${catWeekSpent.toFixed(0)} / ₹${weeklyBudget.toFixed(0)} (${catWeekPercent}%)`,
           `   Month: ₹${catMonthSpent.toFixed(0)} / ₹${budget} (${catMonthPercent}%)`,
-          ``,
-          `   <b>Last Month (Planned vs Consumed):</b>`,
-          `   ₹${catLastMonthSpent.toFixed(0)} / ₹${budget} (${catLastMonthPercent}%)`
+          `   <b>Last Month:</b> ₹${catLastMonthSpent.toFixed(0)} / ₹${budget} (${catLastMonthPercent}%)`
         );
       }
 
-      const message = `💼 <b>Budget Breakdown</b>\n\n${overallLines.join("\n")}${categoryLines.join("\n")}`;
+      const message = `💼 <b>Budget Breakdown</b>\n\n${overallLines.join("\n")}\n\n${"─".repeat(30)}\n${categoryLines.join("\n")}`;
       await sendMessage(chatId, message);
       return res.status(200).send("OK");
     }

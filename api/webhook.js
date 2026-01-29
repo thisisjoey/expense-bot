@@ -200,6 +200,11 @@ async function handleFastCommands(text, chatId) {
 • 50+30-ai or 100-grocery,ai
 • Just type any number (e.g., 150) → goes to "uncategorized"
 
+<b>Tagged Expenses:</b>
+• 100-food for @john - Expense belongs to John, you paid
+• 100-food by @john - Your expense, John paid
+• 100-food split @john - Split expense, John paid
+
 <b>Basic Commands:</b>
 /categories - View all categories
 /summary - Budget overview
@@ -552,6 +557,193 @@ async function ensureUserExists(telegramUserId, displayName, username) {
 
 /* ================= EXPENSE PARSER ================= */
 
+/* ================= TAGGED EXPENSE PARSER ================= */
+
+/**
+ * Parse tagged expenses with special syntax:
+ * - "100-food for @john" - Expense belongs to John, you paid
+ * - "100-food by @john" - Your expense, John paid
+ * - "100-food split @john" - Split expense, John paid
+ * 
+ * Supports all expense formats:
+ * - 100-food, 100 food, 100, food 100
+ * - Multiple amounts: 50+30-food, 50+30 food
+ * - Text with numbers: "bought 100 groceries"
+ */
+function parseTaggedExpense(text, message, members) {
+  // Extract mentions from message entities
+  const entities = message.entities || [];
+  const mentions = entities
+    .filter(e => e.type === 'mention' || e.type === 'text_mention')
+    .map(e => {
+      if (e.type === 'text_mention') {
+        return {
+          username: e.user.username || e.user.first_name,
+          userId: e.user.id,
+          displayName: e.user.first_name,
+        };
+      } else {
+        // Extract @username from text
+        const mentionText = text.substring(e.offset, e.offset + e.length);
+        const username = mentionText.replace('@', '');
+        return { username, userId: null, displayName: username };
+      }
+    });
+  
+  if (mentions.length === 0) {
+    return null; // No mentions found
+  }
+  
+  const mention = mentions[0]; // Use first mention
+  
+  // Find the member in database
+  const taggedMember = members.find(m => 
+    m.username === mention.username || 
+    m.telegramUserId === mention.userId ||
+    m.displayName === mention.displayName
+  );
+  
+  if (!taggedMember) {
+    // Member not found, ignore tagging
+    return null;
+  }
+  
+  // Check for expense type keywords
+  let expenseType = null;
+  const lowerText = text.toLowerCase();
+  
+  if (lowerText.includes(' for @') || lowerText.includes(' for@')) {
+    expenseType = 'for'; // Belongs to tagged person
+  } else if (lowerText.includes(' by @') || lowerText.includes(' by@')) {
+    expenseType = 'by'; // Belongs to you, paid by tagged person
+  } else if (lowerText.includes(' split @') || lowerText.includes(' split@')) {
+    expenseType = 'split'; // Split expense
+  }
+  
+  if (!expenseType) {
+    return null; // No valid expense type keyword
+  }
+  
+  // Remove the tagging part to get clean expense text
+  const cleanText = text
+    .replace(/ for @\w+/gi, '')
+    .replace(/ by @\w+/gi, '')
+    .replace(/ split @\w+/gi, '')
+    .trim();
+  
+  // Parse expense using comprehensive patterns
+  const parsed = parseExpenseText(cleanText);
+  
+  if (!parsed || parsed.amount === 0) {
+    return null; // No valid amount found
+  }
+  
+  return {
+    amount: parsed.amount,
+    category: parsed.category || 'uncategorized',
+    taggedUser: taggedMember,
+    expenseType,
+    comment: cleanText,
+  };
+}
+
+/**
+ * Comprehensive expense text parser
+ * Handles all formats:
+ * - 100-food, 100 food, 100
+ * - food 100, grocery 100
+ * - 50+30-food, 50+30 food
+ * - "bought 100 groceries", "spent 100 on food"
+ */
+function parseExpenseText(text) {
+  const cleaned = text
+    .toLowerCase()
+    .replace(/\b(spent|paid|expense|for|on|the|a|an|in|at|to|bought|purchase|purchased)\b/g, '')
+    .trim();
+  
+  let amount = 0;
+  let category = null;
+  
+  // Pattern 1: Multi-amount with dash (50+30-food)
+  const pattern1 = /(\d+(?:\.\d+)?(?:\s*[+]\s*\d+(?:\.\d+)?)+)\s*-\s*([a-z]+)/;
+  let match = cleaned.match(pattern1);
+  if (match) {
+    const amountStr = match[1].replace(/\s+/g, '');
+    amount = amountStr.split('+').reduce((sum, num) => sum + parseFloat(num), 0);
+    category = match[2];
+    return { amount, category };
+  }
+  
+  // Pattern 2: Multi-amount with space (50+30 food)
+  const pattern2 = /(\d+(?:\.\d+)?(?:\s*[+]\s*\d+(?:\.\d+)?)+)\s+([a-z]+)/;
+  match = cleaned.match(pattern2);
+  if (match) {
+    const amountStr = match[1].replace(/\s+/g, '');
+    amount = amountStr.split('+').reduce((sum, num) => sum + parseFloat(num), 0);
+    category = match[2];
+    return { amount, category };
+  }
+  
+  // Pattern 3: Amount-category with dash (100-food)
+  const pattern3 = /(\d+(?:\.\d+)?)\s*-\s*([a-z]+)/;
+  match = cleaned.match(pattern3);
+  if (match) {
+    amount = parseFloat(match[1]);
+    category = match[2];
+    return { amount, category };
+  }
+  
+  // Pattern 4: Amount category with space (100 food)
+  const pattern4 = /^(\d+(?:\.\d+)?)\s+([a-z]+)/;
+  match = cleaned.match(pattern4);
+  if (match) {
+    amount = parseFloat(match[1]);
+    category = match[2];
+    return { amount, category };
+  }
+  
+  // Pattern 5: Category amount (food 100, grocery 100)
+  const pattern5 = /^([a-z]+)\s+(\d+(?:\.\d+)?)/;
+  match = cleaned.match(pattern5);
+  if (match) {
+    category = match[1];
+    amount = parseFloat(match[2]);
+    return { amount, category };
+  }
+  
+  // Pattern 6: Amount in middle of text ("bought 100 groceries")
+  const pattern6 = /\b(\d+(?:\.\d+)?)\b/;
+  match = cleaned.match(pattern6);
+  if (match) {
+    amount = parseFloat(match[1]);
+    
+    // Try to find category word before or after the amount
+    const words = cleaned.split(/\s+/);
+    const amountIndex = words.findIndex(w => w.includes(match[1]));
+    
+    // Check word before amount
+    if (amountIndex > 0 && /^[a-z]+$/.test(words[amountIndex - 1])) {
+      category = words[amountIndex - 1];
+    }
+    // Check word after amount
+    else if (amountIndex < words.length - 1 && /^[a-z]+$/.test(words[amountIndex + 1])) {
+      category = words[amountIndex + 1];
+    }
+    
+    return { amount, category };
+  }
+  
+  // Pattern 7: Just amount (100)
+  const pattern7 = /^\d+(?:\.\d+)?$/;
+  if (pattern7.test(cleaned)) {
+    amount = parseFloat(cleaned);
+    return { amount, category: null };
+  }
+  
+  return null; // No amount found
+}
+
+
 function parseExpense(text) {
   // Defensive check: Never parse commands (anything starting with /)
   if (text.trim().startsWith("/")) {
@@ -782,7 +974,11 @@ export default async function handler(req, res) {
     }
 
     const chatId = message.chat.id;
-    const text = message.text.trim();
+    // Remove bot username from commands (e.g., /start@botname -> /start)
+    let text = message.text.trim();
+    if (text.includes('@')) {
+      text = text.split('@')[0].trim();
+    }
     const telegramUserId = message.from.id;
     const displayName = message.from.first_name || "";
     const username = message.from.username || "";
@@ -1492,11 +1688,99 @@ Expense not found or already reverted.`
       return res.status(200).send("OK");
     }
 
-    /* ================= EXPENSE PARSER ================= */
+    /* ================= EXPENSE PARSER WITH TAGGING ================= */
 
     // Skip expense parsing if this is a command (starts with /)
     if (!text.startsWith("/")) {
-      // Try to parse as expense
+      // Check for tagged expenses first
+      const taggedExpense = parseTaggedExpense(text, message, data.members);
+      
+      if (taggedExpense) {
+        // Handle tagged expense
+        const { amount, category, taggedUser, expenseType, comment } = taggedExpense;
+        
+        // Validate category
+        if (category !== "uncategorized" && !data.budgets[category]) {
+          await sendMessage(
+            chatId,
+            `❌ "${category}" - category doesn't exist. Use /categories to see available categories.`
+          );
+          return res.status(200).send("OK");
+        }
+        
+        // Determine who the expense belongs to based on type
+        let expenseOwner = userName;
+        let spentBy = userName;
+        
+        if (expenseType === 'for') {
+          // Type A: Belongs fully to tagged person, you paid
+          expenseOwner = taggedUser.userName;
+          spentBy = userName;
+        } else if (expenseType === 'by') {
+          // Type B: Belongs fully to you, tagged person paid
+          expenseOwner = userName;
+          spentBy = taggedUser.userName;
+        } else if (expenseType === 'split') {
+          // Type C: Split expense, tagged person paid
+          expenseOwner = userName; // Will be split in settlement
+          spentBy = taggedUser.userName;
+        }
+        
+        // Save the expense
+        const newExpense = {
+          telegramUserId: expenseType === 'for' ? taggedUser.telegramUserId : telegramUserId,
+          userName: expenseOwner,
+          amount: amount,
+          category: category,
+          comment: comment || text.substring(0, 200),
+          ts: now(),
+          discarded: false,
+          settled: false,
+          telegramMessageId: messageId,
+          spentBy: spentBy, // Track who actually paid
+          expenseType: expenseType, // Track the type for reporting
+        };
+        
+        await saveExpenses([newExpense]);
+        
+        // Reload expenses for budget calculation
+        const updatedExpenses = await loadExpenses();
+        
+        // Calculate budget progress
+        const progress = calculateBudgetProgress(
+          category,
+          data.budgets,
+          updatedExpenses
+        );
+        
+        // Build response message
+        let responseMsg = '';
+        if (expenseType === 'for') {
+          responseMsg = `✅ <b>Expense for @${taggedUser.displayName || taggedUser.userName}</b>\n\n`;
+          responseMsg += `💰 ₹${amount} - ${category}\n`;
+          responseMsg += `💳 Paid by: You\n`;
+          responseMsg += `👤 Belongs to: @${taggedUser.displayName || taggedUser.userName}`;
+        } else if (expenseType === 'by') {
+          responseMsg = `✅ <b>Your Expense</b>\n\n`;
+          responseMsg += `💰 ₹${amount} - ${category}\n`;
+          responseMsg += `💳 Paid by: @${taggedUser.displayName || taggedUser.userName}\n`;
+          responseMsg += `👤 Belongs to: You`;
+        } else if (expenseType === 'split') {
+          responseMsg = `✅ <b>Split Expense</b>\n\n`;
+          responseMsg += `💰 ₹${amount} - ${category}\n`;
+          responseMsg += `💳 Paid by: @${taggedUser.displayName || taggedUser.userName}\n`;
+          responseMsg += `📊 Will be split in settlement`;
+        }
+        
+        responseMsg += `\n\n<b>${category}:</b>\n`;
+        responseMsg += `Today: ₹${progress.spentToday.toFixed(0)}/₹${progress.dailyBudget.toFixed(0)} (${progress.dailyPercent}%)\n`;
+        responseMsg += `Month: ₹${progress.spentThisMonth.toFixed(0)}/₹${progress.monthlyBudget.toFixed(0)} (${progress.monthlyPercent}%)`;
+        
+        await sendMessage(chatId, responseMsg, messageId);
+        return res.status(200).send("OK");
+      }
+      
+      // Try to parse as regular expense
       const parsedExpenses = parseExpense(text);
 
     if (parsedExpenses.length > 0) {

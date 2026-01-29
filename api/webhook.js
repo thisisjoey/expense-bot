@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 /* ================= VERSION ================= */
-const WEBHOOK_VERSION = "2.1.0-FINAL-TAGGED-EXPENSES-FIX";
+const WEBHOOK_VERSION = "2.1.1-FINAL-ALL-FIXES-COMPLETE";
 
 /* ================= CONFIG ================= */
 
@@ -1712,15 +1712,11 @@ Expense not found or already reverted.`
       
       if (taggedExpense) {
         // Handle tagged expense
-        const { amount, category, taggedUser, expenseType, comment } = taggedExpense;
+        let { amount, category, taggedUser, expenseType, comment } = taggedExpense;
         
-        // Validate category
+        // Validate category - if doesn't exist, default to uncategorized
         if (category !== "uncategorized" && !data.budgets[category]) {
-          await sendMessage(
-            chatId,
-            `❌ "${category}" - category doesn't exist. Use /categories to see available categories.`
-          );
-          return res.status(200).send("OK");
+          category = "uncategorized";
         }
         
         // Determine who the expense belongs to based on type
@@ -1803,14 +1799,11 @@ Expense not found or already reverted.`
       const errors = [];
 
       for (const exp of parsedExpenses) {
-        // Allow "uncategorized" category to pass through
-        if (exp.category === "uncategorized" || data.budgets[exp.category]) {
-          validExpenses.push(exp);
-        } else {
-          errors.push(
-            `❌ "${exp.category}" - category doesn't exist. Use /categories to see available categories.`
-          );
+        // If category doesn't exist and is not "uncategorized", change it to "uncategorized"
+        if (exp.category && exp.category !== "uncategorized" && !data.budgets[exp.category]) {
+          exp.category = "uncategorized";
         }
+        validExpenses.push(exp);
       }
 
       if (validExpenses.length === 0) {

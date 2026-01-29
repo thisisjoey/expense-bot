@@ -586,25 +586,55 @@ function parseTaggedExpense(text, message, members) {
         // Extract @username from text
         const mentionText = text.substring(e.offset, e.offset + e.length);
         const username = mentionText.replace('@', '');
+        console.log('Extracted mention:', username, 'from text:', mentionText);
         return { username, userId: null, displayName: username };
       }
     });
   
   if (mentions.length === 0) {
+    console.log('No mentions found in entities:', entities);
     return null; // No mentions found
   }
   
   const mention = mentions[0]; // Use first mention
+  console.log('Processing mention:', mention);
   
-  // Find the member in database
-  const taggedMember = members.find(m => 
-    m.username === mention.username || 
-    m.telegramUserId === mention.userId ||
-    m.displayName === mention.displayName
-  );
+  // Find the member in database - case insensitive matching
+  const taggedMember = members.find(m => {
+    // Match by telegram user ID (most reliable)
+    if (mention.userId && m.telegramUserId === mention.userId) {
+      return true;
+    }
+    
+    // Match by username (case insensitive)
+    if (mention.username && m.username && 
+        m.username.toLowerCase() === mention.username.toLowerCase()) {
+      return true;
+    }
+    
+    // Match by display name (case insensitive)
+    if (mention.displayName && m.displayName && 
+        m.displayName.toLowerCase() === mention.displayName.toLowerCase()) {
+      return true;
+    }
+    
+    // Match by userName (case insensitive)
+    if (mention.username && m.userName && 
+        m.userName.toLowerCase() === mention.username.toLowerCase()) {
+      return true;
+    }
+    
+    return false;
+  });
   
   if (!taggedMember) {
     // Member not found, ignore tagging
+    console.log('Tagged member not found:', mention.username || mention.displayName);
+    console.log('Available members:', members.map(m => ({
+      userName: m.userName,
+      username: m.username,
+      displayName: m.displayName
+    })));
     return null;
   }
   
@@ -2204,6 +2234,9 @@ Expense not found or already reverted.`
       return res.status(200).send("OK");
     }
 
+
+
+    
     // If no command matched and not an expense, ignore
     return res.status(200).send("OK");
   } catch (err) {

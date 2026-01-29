@@ -1395,29 +1395,69 @@ No unsettled expenses. Start adding new expenses to track.`
         return res.status(200).send("OK");
       }
 
-      // Calculate total spent by each user
-      const userTotals = {};
+      // NEW LOGIC: Track who paid and who owes based on expense type
+      // balances[userName] = positive means they are owed money, negative means they owe money
+      const balances = {};
       data.members.forEach((m) => {
-        userTotals[m.userName] = 0;
+        balances[m.userName] = 0;
       });
 
       unsettledExpenses.forEach((e) => {
-        if (userTotals[e.userName] !== undefined) {
-          userTotals[e.userName] += e.amount;
+        const expenseOwner = e.userName; // Who the expense belongs to
+        const paidBy = e.spentBy || e.userName; // Who actually paid (for "by @user" expenses)
+        const expenseType = e.expenseType;
+
+        if (expenseType === 'by') {
+          // Type B: "100-food by @john"
+          // Expense belongs to you (e.userName), but John paid (e.spentBy)
+          // So you owe John the full amount
+          if (balances[paidBy] !== undefined) {
+            balances[paidBy] += e.amount; // John is owed money
+          }
+          if (balances[expenseOwner] !== undefined) {
+            balances[expenseOwner] -= e.amount; // You owe money
+          }
+        } else if (expenseType === 'for') {
+          // Type A: "100-food for @john"
+          // Expense belongs to John (e.userName), but you paid (e.spentBy)
+          // So John owes you the full amount
+          if (balances[paidBy] !== undefined) {
+            balances[paidBy] += e.amount; // You are owed money
+          }
+          if (balances[expenseOwner] !== undefined) {
+            balances[expenseOwner] -= e.amount; // John owes money
+          }
         }
+        // Note: For 'split' and regular expenses, we don't add to balances here
+        // They will be calculated in the split-the-bill section below
       });
 
-      const totalSpent = Object.values(userTotals).reduce(
-        (sum, amt) => sum + amt,
-        0
+      // For split expenses and regular expenses, calculate split-the-bill
+      // First, get all regular and split expenses
+      const regularAndSplitExpenses = unsettledExpenses.filter(
+        (e) => !e.expenseType || e.expenseType === 'split'
       );
-      const perPerson = totalSpent / data.members.length;
 
-      // Calculate balances
-      const balances = {};
-      data.members.forEach((m) => {
-        balances[m.userName] = userTotals[m.userName] - perPerson;
-      });
+      if (regularAndSplitExpenses.length > 0) {
+        // Calculate split amounts
+        const splitTotal = regularAndSplitExpenses.reduce((sum, e) => sum + e.amount, 0);
+        const perPerson = splitTotal / data.members.length;
+
+        // Adjust balances for split expenses
+        data.members.forEach((m) => {
+          // For split expenses, track who actually paid (use spentBy, not userName)
+          const userPaidOnSplit = regularAndSplitExpenses
+            .filter((e) => {
+              const paidBy = e.spentBy || e.userName;
+              return paidBy === m.userName;
+            })
+            .reduce((sum, e) => sum + e.amount, 0);
+          
+          // For split: they are owed what they paid minus their fair share
+          balances[m.userName] = balances[m.userName] || 0;
+          balances[m.userName] += (userPaidOnSplit - perPerson);
+        });
+      }
 
       // Separate creditors and debtors
       const creditors = [];
@@ -1432,6 +1472,8 @@ No unsettled expenses. Start adding new expenses to track.`
       });
 
       if (creditors.length === 0 && debtors.length === 0) {
+        const totalSpent = unsettledExpenses.reduce((sum, e) => sum + e.amount, 0);
+        const perPerson = totalSpent / data.members.length;
         await sendMessage(
           chatId,
           `💸 <b>All Settled!</b>
@@ -1472,9 +1514,9 @@ Per person: ₹${perPerson.toFixed(2)}`
         if (debtor.amount < 0.01) j++;
       }
 
+      const totalSpent = unsettledExpenses.reduce((sum, e) => sum + e.amount, 0);
       const lines = [
         `<b>Total:</b> ₹${totalSpent.toFixed(2)}`,
-        `<b>Per person:</b> ₹${perPerson.toFixed(2)}`,
         "",
         ...settlements,
       ];
@@ -1697,15 +1739,11 @@ Expense not found or already reverted.`
       
       if (taggedExpense) {
         // Handle tagged expense
-        const { amount, category, taggedUser, expenseType, comment } = taggedExpense;
+        let { amount, category, taggedUser, expenseType, comment } = taggedExpense;
         
-        // Validate category
+        // Validate category - if doesn't exist, default to uncategorized
         if (category !== "uncategorized" && !data.budgets[category]) {
-          await sendMessage(
-            chatId,
-            `❌ "${category}" - category doesn't exist. Use /categories to see available categories.`
-          );
-          return res.status(200).send("OK");
+          category = "uncategorized";
         }
         
         // Determine who the expense belongs to based on type
@@ -1788,14 +1826,11 @@ Expense not found or already reverted.`
       const errors = [];
 
       for (const exp of parsedExpenses) {
-        // Allow "uncategorized" category to pass through
-        if (exp.category === "uncategorized" || data.budgets[exp.category]) {
-          validExpenses.push(exp);
-        } else {
-          errors.push(
-            `❌ "${exp.category}" - category doesn't exist. Use /categories to see available categories.`
-          );
+        // If category doesn't exist and is not "uncategorized", change it to "uncategorized"
+        if (exp.category && exp.category !== "uncategorized" && !data.budgets[exp.category]) {
+          exp.category = "uncategorized";
         }
+        validExpenses.push(exp);
       }
 
       if (validExpenses.length === 0) {

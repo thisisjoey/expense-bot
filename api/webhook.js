@@ -1,5 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
+/* ================= VERSION ================= */
+const WEBHOOK_VERSION = "2.1.0-FINAL-TAGGED-EXPENSES-FIX";
+
 /* ================= CONFIG ================= */
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -189,7 +192,15 @@ async function generateAlerts(budgets, expenses, timeframe = "monthly") {
 /* ================= FAST COMMANDS (NO DB) ================= */
 
 async function handleFastCommands(text, chatId) {
-  if (text !== "/start" && text !== "/help") return false;
+  if (text !== "/start" && text !== "/help" && text !== "/version") return false;
+
+  if (text === "/version") {
+    await sendMessage(
+      chatId,
+      `🤖 <b>Webhook Version</b>\n\nVersion: ${WEBHOOK_VERSION}\n\nThis confirms the correct code is deployed.`
+    );
+    return true;
+  }
 
   await sendMessage(
     chatId,
@@ -319,6 +330,8 @@ async function loadExpenses() {
     discarded: !!e.discarded,
     settled: !!e.settled, // NEW: Track if expense has been settled
     telegramMessageId: e.telegram_message_id,
+    spentBy: e.spent_by,           // For tagged expenses - who paid
+    expenseType: e.expense_type,   // For tagged expenses - 'for', 'by', 'split'
   }));
 }
 
@@ -336,6 +349,8 @@ async function saveExpenses(expenses) {
       discarded: e.discarded || false,
       settled: e.settled || false, // NEW: Default to unsettled
       telegram_message_id: e.telegramMessageId,
+      spent_by: e.spentBy || null,        // For tagged expenses - who paid
+      expense_type: e.expenseType || null, // For tagged expenses - 'for', 'by', 'split'
     }))
   );
 
@@ -586,55 +601,25 @@ function parseTaggedExpense(text, message, members) {
         // Extract @username from text
         const mentionText = text.substring(e.offset, e.offset + e.length);
         const username = mentionText.replace('@', '');
-        console.log('Extracted mention:', username, 'from text:', mentionText);
         return { username, userId: null, displayName: username };
       }
     });
   
   if (mentions.length === 0) {
-    console.log('No mentions found in entities:', entities);
     return null; // No mentions found
   }
   
   const mention = mentions[0]; // Use first mention
-  console.log('Processing mention:', mention);
   
-  // Find the member in database - case insensitive matching
-  const taggedMember = members.find(m => {
-    // Match by telegram user ID (most reliable)
-    if (mention.userId && m.telegramUserId === mention.userId) {
-      return true;
-    }
-    
-    // Match by username (case insensitive)
-    if (mention.username && m.username && 
-        m.username.toLowerCase() === mention.username.toLowerCase()) {
-      return true;
-    }
-    
-    // Match by display name (case insensitive)
-    if (mention.displayName && m.displayName && 
-        m.displayName.toLowerCase() === mention.displayName.toLowerCase()) {
-      return true;
-    }
-    
-    // Match by userName (case insensitive)
-    if (mention.username && m.userName && 
-        m.userName.toLowerCase() === mention.username.toLowerCase()) {
-      return true;
-    }
-    
-    return false;
-  });
+  // Find the member in database
+  const taggedMember = members.find(m => 
+    m.username === mention.username || 
+    m.telegramUserId === mention.userId ||
+    m.displayName === mention.displayName
+  );
   
   if (!taggedMember) {
     // Member not found, ignore tagging
-    console.log('Tagged member not found:', mention.username || mention.displayName);
-    console.log('Available members:', members.map(m => ({
-      userName: m.userName,
-      username: m.username,
-      displayName: m.displayName
-    })));
     return null;
   }
   
@@ -1425,69 +1410,29 @@ No unsettled expenses. Start adding new expenses to track.`
         return res.status(200).send("OK");
       }
 
-      // NEW LOGIC: Track who paid and who owes based on expense type
-      // balances[userName] = positive means they are owed money, negative means they owe money
-      const balances = {};
+      // Calculate total spent by each user
+      const userTotals = {};
       data.members.forEach((m) => {
-        balances[m.userName] = 0;
+        userTotals[m.userName] = 0;
       });
 
       unsettledExpenses.forEach((e) => {
-        const expenseOwner = e.userName; // Who the expense belongs to
-        const paidBy = e.spentBy || e.userName; // Who actually paid (for "by @user" expenses)
-        const expenseType = e.expenseType;
-
-        if (expenseType === 'by') {
-          // Type B: "100-food by @john"
-          // Expense belongs to you (e.userName), but John paid (e.spentBy)
-          // So you owe John the full amount
-          if (balances[paidBy] !== undefined) {
-            balances[paidBy] += e.amount; // John is owed money
-          }
-          if (balances[expenseOwner] !== undefined) {
-            balances[expenseOwner] -= e.amount; // You owe money
-          }
-        } else if (expenseType === 'for') {
-          // Type A: "100-food for @john"
-          // Expense belongs to John (e.userName), but you paid (e.spentBy)
-          // So John owes you the full amount
-          if (balances[paidBy] !== undefined) {
-            balances[paidBy] += e.amount; // You are owed money
-          }
-          if (balances[expenseOwner] !== undefined) {
-            balances[expenseOwner] -= e.amount; // John owes money
-          }
+        if (userTotals[e.userName] !== undefined) {
+          userTotals[e.userName] += e.amount;
         }
-        // Note: For 'split' and regular expenses, we don't add to balances here
-        // They will be calculated in the split-the-bill section below
       });
 
-      // For split expenses and regular expenses, calculate split-the-bill
-      // First, get all regular and split expenses
-      const regularAndSplitExpenses = unsettledExpenses.filter(
-        (e) => !e.expenseType || e.expenseType === 'split'
+      const totalSpent = Object.values(userTotals).reduce(
+        (sum, amt) => sum + amt,
+        0
       );
+      const perPerson = totalSpent / data.members.length;
 
-      if (regularAndSplitExpenses.length > 0) {
-        // Calculate split amounts
-        const splitTotal = regularAndSplitExpenses.reduce((sum, e) => sum + e.amount, 0);
-        const perPerson = splitTotal / data.members.length;
-
-        // Adjust balances for split expenses
-        data.members.forEach((m) => {
-          // For split expenses, track who actually paid (use spentBy, not userName)
-          const userPaidOnSplit = regularAndSplitExpenses
-            .filter((e) => {
-              const paidBy = e.spentBy || e.userName;
-              return paidBy === m.userName;
-            })
-            .reduce((sum, e) => sum + e.amount, 0);
-          
-          // For split: they are owed what they paid minus their fair share
-          balances[m.userName] = balances[m.userName] || 0;
-          balances[m.userName] += (userPaidOnSplit - perPerson);
-        });
-      }
+      // Calculate balances
+      const balances = {};
+      data.members.forEach((m) => {
+        balances[m.userName] = userTotals[m.userName] - perPerson;
+      });
 
       // Separate creditors and debtors
       const creditors = [];
@@ -1502,8 +1447,6 @@ No unsettled expenses. Start adding new expenses to track.`
       });
 
       if (creditors.length === 0 && debtors.length === 0) {
-        const totalSpent = unsettledExpenses.reduce((sum, e) => sum + e.amount, 0);
-        const perPerson = totalSpent / data.members.length;
         await sendMessage(
           chatId,
           `💸 <b>All Settled!</b>
@@ -1544,9 +1487,9 @@ Per person: ₹${perPerson.toFixed(2)}`
         if (debtor.amount < 0.01) j++;
       }
 
-      const totalSpent = unsettledExpenses.reduce((sum, e) => sum + e.amount, 0);
       const lines = [
         `<b>Total:</b> ₹${totalSpent.toFixed(2)}`,
+        `<b>Per person:</b> ₹${perPerson.toFixed(2)}`,
         "",
         ...settlements,
       ];
@@ -1769,11 +1712,15 @@ Expense not found or already reverted.`
       
       if (taggedExpense) {
         // Handle tagged expense
-        let { amount, category, taggedUser, expenseType, comment } = taggedExpense;
+        const { amount, category, taggedUser, expenseType, comment } = taggedExpense;
         
-        // Validate category - if doesn't exist, default to uncategorized
+        // Validate category
         if (category !== "uncategorized" && !data.budgets[category]) {
-          category = "uncategorized";
+          await sendMessage(
+            chatId,
+            `❌ "${category}" - category doesn't exist. Use /categories to see available categories.`
+          );
+          return res.status(200).send("OK");
         }
         
         // Determine who the expense belongs to based on type
@@ -1856,11 +1803,14 @@ Expense not found or already reverted.`
       const errors = [];
 
       for (const exp of parsedExpenses) {
-        // If category doesn't exist and is not "uncategorized", change it to "uncategorized"
-        if (exp.category && exp.category !== "uncategorized" && !data.budgets[exp.category]) {
-          exp.category = "uncategorized";
+        // Allow "uncategorized" category to pass through
+        if (exp.category === "uncategorized" || data.budgets[exp.category]) {
+          validExpenses.push(exp);
+        } else {
+          errors.push(
+            `❌ "${exp.category}" - category doesn't exist. Use /categories to see available categories.`
+          );
         }
-        validExpenses.push(exp);
       }
 
       if (validExpenses.length === 0) {
@@ -2234,9 +2184,6 @@ Expense not found or already reverted.`
       return res.status(200).send("OK");
     }
 
-
-
-    
     // If no command matched and not an expense, ignore
     return res.status(200).send("OK");
   } catch (err) {

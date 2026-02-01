@@ -2192,8 +2192,8 @@ Expense not found or already reverted.`
     }
 
       if (validExpenses.length === 0) {
-        await sendMessage(chatId, errors.join("\n\n"));
-        return res.status(200).send("OK");
+      // This shouldn't happen, but just return OK
+      return res.status(200).send("OK");
       }
 
       // Save valid expenses (they start as unsettled by default)
@@ -2281,10 +2281,6 @@ Expense not found or already reverted.`
 
       if (budgetLines.length > 0) {
         response += `\n\n${budgetLines.join("\n")}`;
-      }
-
-      if (errors.length > 0) {
-        response += "\n\n" + errors.join("\n\n");
       }
 
       await sendMessage(chatId, response, messageId);

@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
+import ExcelJS from "exceljs";
 
 /* ================= VERSION ================= */
-const WEBHOOK_VERSION = "2.1.1-FINAL-ALL-FIXES-COMPLETE";
+const WEBHOOK_VERSION = "2.2.0-EXPORT-FEATURE";
 
 /* ================= CONFIG ================= */
 
@@ -48,6 +49,195 @@ async function sendMessage(chatId, text, replyTo = null) {
     }
   }
 }
+
+
+async function sendDocument(chatId, fileBuffer, fileName, replyTo = null) {
+  try {
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    formData.append("document", new Blob([fileBuffer]), fileName);
+    
+    if (replyTo) {
+      formData.append("reply_to_message_id", replyTo);
+    }
+
+    await fetch(`${BOT_API}/sendDocument`, {
+      method: "POST",
+      body: formData,
+    });
+  } catch (error) {
+    console.error("Failed to send document:", error);
+    throw error;
+  }
+}
+
+
+async function generateExcelReport() {
+  const workbook = new ExcelJS.Workbook();
+  
+  // Fetch all data from tables
+  const { data: expenses, error: expensesError } = await supabase
+    .from("expenses")
+    .select("*")
+    .order("ts", { ascending: false });
+  
+  const { data: activeExpenses, error: activeExpensesError } = await supabase
+    .from("active_expenses")
+    .select("*");
+  
+  const { data: budgetStatus, error: budgetStatusError } = await supabase
+    .from("budget_status")
+    .select("*");
+  
+  const { data: budgets, error: budgetsError } = await supabase
+    .from("budgets")
+    .select("*");
+  
+  const { data: members, error: membersError } = await supabase
+    .from("members")
+    .select("*");
+  
+  const { data: settlements, error: settlementsError } = await supabase
+    .from("settlements")
+    .select("*");
+  
+  const { data: userExpensePending, error: userExpensePendingError } = await supabase
+    .from("user_expense_pending")
+    .select("*");
+
+  // Check for errors
+  if (expensesError || activeExpensesError || budgetStatusError || 
+      budgetsError || membersError || settlementsError || userExpensePendingError) {
+    throw new Error("Failed to fetch data from database");
+  }
+
+  // Helper function to create styled sheet
+  const createSheet = (name, data, columns) => {
+    const sheet = workbook.addWorksheet(name);
+    
+    // Set column definitions
+    sheet.columns = columns;
+    
+    // Style header row
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4472C4' }
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    headerRow.height = 20;
+    
+    // Add data
+    if (data && data.length > 0) {
+      data.forEach(row => {
+        sheet.addRow(row);
+      });
+    }
+    
+    // Auto-fit columns
+    sheet.columns.forEach(column => {
+      let maxLength = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        const columnLength = cell.value ? cell.value.toString().length : 10;
+        if (columnLength > maxLength) {
+          maxLength = columnLength;
+        }
+      });
+      column.width = Math.min(Math.max(maxLength + 2, 12), 50);
+    });
+    
+    // Add borders
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          left: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          bottom: { style: 'thin', color: { argb: 'FFD0D0D0' } },
+          right: { style: 'thin', color: { argb: 'FFD0D0D0' } }
+        };
+      });
+    });
+  };
+
+  // 1. Expenses Sheet
+  createSheet('Expenses', expenses, [
+    { header: 'ID', key: 'id', width: 10 },
+    { header: 'User Name', key: 'user_name', width: 20 },
+    { header: 'Amount', key: 'amount', width: 15 },
+    { header: 'Category', key: 'category', width: 20 },
+    { header: 'Comment', key: 'comment', width: 30 },
+    { header: 'Timestamp', key: 'ts', width: 25 },
+    { header: 'Discarded', key: 'discarded', width: 12 },
+    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
+    { header: 'Telegram Message ID', key: 'telegram_message_id', width: 22 },
+    { header: 'Settled', key: 'settled', width: 12 },
+    { header: 'Spent By', key: 'spent_by', width: 20 },
+    { header: 'Expense Type', key: 'expense_type', width: 20 }
+  ]);
+
+  // 2. Active Expenses Sheet
+  createSheet('Active Expenses', activeExpenses, [
+    { header: 'ID', key: 'id', width: 10 },
+    { header: 'User Name', key: 'user_name', width: 20 },
+    { header: 'Amount', key: 'amount', width: 15 },
+    { header: 'Category', key: 'category', width: 20 },
+    { header: 'Comment', key: 'comment', width: 30 },
+    { header: 'Timestamp', key: 'ts', width: 25 },
+    { header: 'Discarded', key: 'discarded', width: 12 },
+    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
+    { header: 'Telegram Message ID', key: 'telegram_message_id', width: 22 },
+    { header: 'Display Name', key: 'display_name', width: 20 },
+    { header: 'Username', key: 'username', width: 20 },
+    { header: 'Category Budget', key: 'category_budget', width: 18 }
+  ]);
+
+  // 3. Budget Status Sheet
+  createSheet('Budget Status', budgetStatus, [
+    { header: 'Category', key: 'category', width: 20 },
+    { header: 'Budget', key: 'budget', width: 15 },
+    { header: 'Spent', key: 'spent', width: 15 },
+    { header: 'Remaining', key: 'remaining', width: 15 },
+    { header: 'Percent Used', key: 'percent_used', width: 18 }
+  ]);
+
+  // 4. Budgets Sheet
+  createSheet('Budgets', budgets, [
+    { header: 'Category', key: 'category', width: 20 },
+    { header: 'Budget', key: 'budget', width: 15 }
+  ]);
+
+  // 5. Members Sheet
+  createSheet('Members', members, [
+    { header: 'User Name', key: 'user_name', width: 20 },
+    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
+    { header: 'Display Name', key: 'display_name', width: 20 },
+    { header: 'Username', key: 'username', width: 20 }
+  ]);
+
+  // 6. Settlements Sheet
+  createSheet('Settlements', settlements, [
+    { header: 'User Name', key: 'user_name', width: 20 },
+    { header: 'Settled', key: 'settled', width: 12 },
+    { header: 'Last Settled Date', key: 'last_settled_date', width: 25 },
+    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 }
+  ]);
+
+  // 7. User Expense Pending Sheet
+  createSheet('User Expense Pending', userExpensePending, [
+    { header: 'User Name', key: 'user_name', width: 20 },
+    { header: 'Display Name', key: 'display_name', width: 20 },
+    { header: 'Username', key: 'username', width: 20 },
+    { header: 'Total Spent', key: 'total_spent', width: 15 },
+    { header: 'Expense Count', key: 'expense_count', width: 18 }
+  ]);
+
+  // Generate buffer
+  const buffer = await workbook.xlsx.writeBuffer();
+  return buffer;
+}
+
 
 function now() {
   return new Date().toISOString();
@@ -211,16 +401,12 @@ async function handleFastCommands(text, chatId) {
 • 50+30-ai or 100-grocery,ai
 • Just type any number (e.g., 150) → goes to "uncategorized"
 
-<b>Tagged Expenses:</b>
-• 100-food for @john - Expense belongs to John, you paid
-• 100-food by @john - Your expense, John paid
-• 100-food split @john - Split expense, John paid
-
 <b>Basic Commands:</b>
 /categories - View all categories
 /summary - Budget overview
 /owe - Settlement calculations
 /settled - Mark yourself as settled
+/export - Download complete data report
 
 <b>Advanced Commands:</b>
 /stats - Spending statistics
@@ -2176,7 +2362,51 @@ Expense not found or already reverted.`
       await sendMessage(chatId, alertData.message);
       return res.status(200).send("OK");
     }
+    /* ================= EXPORT COMMAND ================= */
+    if (text === "/export") {
+      // Send immediate confirmation
+      await sendMessage(
+        chatId,
+        `📊 <b>Generating Report</b>\n\n⏳ Your complete data export is being generated...\n\nThis may take a moment. The Excel file will be shared shortly.`,
+        messageId
+      );
 
+      try {
+        // Generate Excel report
+        const excelBuffer = await generateExcelReport();
+        
+        // Get current date for filename
+        const now = new Date();
+        const dateStr = now.toLocaleDateString("en-IN", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          timeZone: "Asia/Kolkata"
+        }).replace(/\//g, "-");
+        
+        const fileName = `Expense_Report_${dateStr}.xlsx`;
+        
+        // Send the Excel file
+        await sendDocument(chatId, excelBuffer, fileName, messageId);
+        
+        // Send success message
+        await sendMessage(
+          chatId,
+          `✅ <b>Report Generated Successfully</b>\n\n📁 File: ${fileName}\n\nYour complete expense data has been exported with the following sheets:\n• Expenses\n• Active Expenses\n• Budget Status\n• Budgets\n• Members\n• Settlements\n• User Expense Pending`,
+          messageId
+        );
+        
+      } catch (error) {
+        console.error("Export generation failed:", error);
+        await sendMessage(
+          chatId,
+          `❌ <b>Export Failed</b>\n\n⚠️ Something went wrong while generating your report.\n\nPlease try again later. If the issue persists, contact support.`,
+          messageId
+        );
+      }
+      
+      return res.status(200).send("OK");
+    }
     // If no command matched and not an expense, ignore
     return res.status(200).send("OK");
   } catch (err) {

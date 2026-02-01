@@ -2306,35 +2306,68 @@ Expense not found or already reverted.`
         return res.status(200).send("OK");
       }
 
-      // Get IDs of all active expenses
-      const activeExpenseIds = data.expenses
-        .filter((e) => !e.discarded)
-        .map((e) => e.id);
-
-      // Actually delete from database
-      if (activeExpenseIds.length > 0) {
-        const { error } = await supabase
-          .from("expenses")
-          .delete()
-          .in("id", activeExpenseIds);
-
-        if (error) {
-          console.error("Error deleting expenses:", error);
-          await sendMessage(
-            chatId,
-            `❌ <b>Error</b>\n\nFailed to delete expenses: ${error.message}`
-          );
-          return res.status(200).send("OK");
-        }
-      }
-
+      // Send confirmation that export is being generated
       await sendMessage(
         chatId,
-        `🗑️ <b>Deleted ${activeCount} expenses</b>\n\n<i>All rows have been permanently removed from the database.</i>`
+        `📊 <b>Generating Backup & Clearing Data</b>\n\n⏳ Creating backup export before deletion...\n\nThis may take a moment.`,
+        messageId
       );
+
+      try {
+        // Generate Excel report first
+        const excelBuffer = await generateExcelReport();
+        
+        // Get current date for filename
+        const nowDate = new Date();
+        const dateStr = nowDate.toLocaleDateString("en-IN", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          timeZone: "Asia/Kolkata"
+        }).replace(/\//g, "-");
+        
+        const fileName = `Expense_Backup_Before_Clear_${dateStr}.xlsx`;
+        
+        // Send the Excel file
+        await sendDocument(chatId, excelBuffer, fileName, messageId);
+        
+        // Now delete expenses after successful export
+        const activeExpenseIds = data.expenses
+          .filter((e) => !e.discarded)
+          .map((e) => e.id);
+
+        if (activeExpenseIds.length > 0) {
+          const { error } = await supabase
+            .from("expenses")
+            .delete()
+            .in("id", activeExpenseIds);
+
+          if (error) {
+            console.error("Error deleting expenses:", error);
+            await sendMessage(
+              chatId,
+              `❌ <b>Delete Failed</b>\n\n⚠️ Backup created but deletion failed: ${error.message}\n\nYour data is safe in the backup file above.`
+            );
+            return res.status(200).send("OK");
+          }
+        }
+
+        // Send final success message
+        await sendMessage(
+          chatId,
+          `✅ <b>Cleared ${activeCount} expenses</b>\n\n📁 Backup: ${fileName}\n\n<i>All data backed up and deleted from database.</i>`
+        );
+        
+      } catch (error) {
+        console.error("Export generation failed:", error);
+        await sendMessage(
+          chatId,
+          `❌ <b>Clear Cancelled</b>\n\n⚠️ Could not generate backup export.\n\nNo data was deleted. Please try again later.`
+        );
+      }
+      
       return res.status(200).send("OK");
     }
-
     /* ================= BUDGET BREAKDOWN ================= */
     if (text === "/budget") {
       const categories = Object.keys(data.budgets);

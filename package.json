@@ -12,7 +12,8 @@
     "lint:fix": "eslint . --fix"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "exceljs": "^4.4.0"
   },
   "devDependencies": {
     "@babel/core": "^7.23.0",

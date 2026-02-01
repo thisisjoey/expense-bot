@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
+import OpenAI from "openai";
 
 /* ================= VERSION ================= */
 const WEBHOOK_VERSION = "2.2.0-EXPORT-FEATURE";
@@ -15,7 +16,9 @@ const BOT_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false },
 });
-
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 /* ================= HELPERS ================= */
 
 async function sendMessage(chatId, text, replyTo = null) {
@@ -71,6 +74,68 @@ async function sendDocument(chatId, fileBuffer, fileName, replyTo = null) {
   }
 }
 
+/* ================= AI CATEGORIZATION ================= */
+
+async function categorizePurchaseWithAI(message, availableCategories) {
+  try {
+    // If no categories available except uncategorized, skip AI
+    const validCategories = availableCategories.filter(cat => cat !== "uncategorized");
+    if (validCategories.length === 0) {
+      return "uncategorized";
+    }
+
+    const prompt = `You are a smart expense categorization assistant. Given a purchase message and available categories, determine the BEST matching category.
+
+Purchase message: "${message}"
+
+Available categories: ${validCategories.join(", ")}
+
+Rules:
+1. Return ONLY the category name, nothing else
+2. If no category fits well, return "uncategorized"
+3. Be smart about context (e.g., "bought milk" = grocery, "uber ride" = transport)
+4. Match partial words (e.g., "groceries" matches "grocery")
+
+Category:`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expense categorization expert. Return only the category name, nothing else."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 20,
+    });
+
+    const suggestedCategory = response.choices[0].message.content.trim().toLowerCase();
+    
+    // Verify the suggested category exists
+    if (availableCategories.includes(suggestedCategory)) {
+      return suggestedCategory;
+    }
+    
+    // Check for partial matches
+    const partialMatch = availableCategories.find(cat => 
+      cat.includes(suggestedCategory) || suggestedCategory.includes(cat)
+    );
+    
+    if (partialMatch) {
+      return partialMatch;
+    }
+    
+    return "uncategorized";
+  } catch (error) {
+    console.error("AI categorization error:", error);
+    return "uncategorized"; // Fallback on error
+  }
+}
 
 async function generateExcelReport() {
   const workbook = new ExcelJS.Workbook();
@@ -980,6 +1045,21 @@ function parseExpenseText(text) {
     amount = parseFloat(match[1]);
     category = match[2];
     return { amount, category };
+  }
+
+  // Pattern 4B: category number (grocery 90)
+  const pattern4b = /^([a-z]+)\s+(\d+(?:\.\d+)?)$/;
+  match = pattern4b.exec(cleaned);
+  if (match && !isRangeUsed(0, match[0].length)) {
+    const key = `${match[2]}-${match[1]}`;
+    if (!seen.has(key)) {
+      results.push({
+        amount: parseFloat(match[2]),
+        category: match[1],
+      });
+      seen.add(key);
+      usedRanges.push({ start: 0, end: match[0].length });
+    }
   }
   
   // Pattern 5: Category amount (food 100, grocery 100)
@@ -2092,16 +2172,24 @@ Expense not found or already reverted.`
       const parsedExpenses = parseExpense(text);
 
     if (parsedExpenses.length > 0) {
-      const validExpenses = [];
-      const errors = [];
+    const validExpenses = [];
+    const availableCategories = Object.keys(data.budgets);
 
-      for (const exp of parsedExpenses) {
-        // If category doesn't exist and is not "uncategorized", change it to "uncategorized"
-        if (exp.category && exp.category !== "uncategorized" && !data.budgets[exp.category]) {
-          exp.category = "uncategorized";
-        }
-        validExpenses.push(exp);
+    for (const exp of parsedExpenses) {
+      // If category doesn't exist, try AI categorization
+      if (exp.category && exp.category !== "uncategorized" && !data.budgets[exp.category]) {
+        console.log(`Category "${exp.category}" not found, using AI to categorize: "${text}"`);
+        exp.category = await categorizePurchaseWithAI(text, availableCategories);
       }
+      // If no category was parsed at all, use AI
+      else if (!exp.category || exp.category.trim() === "") {
+        console.log(`No category parsed, using AI to categorize: "${text}"`);
+        exp.category = await categorizePurchaseWithAI(text, availableCategories);
+      }
+      // If parsed category exists, use it as-is (explicit user intent)
+      
+      validExpenses.push(exp);
+    }
 
       if (validExpenses.length === 0) {
         await sendMessage(chatId, errors.join("\n\n"));

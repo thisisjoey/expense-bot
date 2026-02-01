@@ -1766,54 +1766,64 @@ Per person: ₹${perPerson.toFixed(2)}`
     /* ================= SETTLED COMMAND - UPDATED ================= */
 
 if (text === "/settled") {
-  // First check if user has any unsettled expenses
-  const userUnsettledExpenses = data.expenses.filter(
-    (e) => !e.discarded && !e.settled && e.userName === userName
-  );
-
-  // Also check if there are ANY unsettled expenses at all (for split scenarios)
-  const anyUnsettledExpenses = data.expenses.filter(
+  // Check if there are ANY unsettled expenses at all
+  const unsettledExpenses = data.expenses.filter(
     (e) => !e.discarded && !e.settled
   );
 
-  if (anyUnsettledExpenses.length === 0) {
+  if (unsettledExpenses.length === 0) {
     await sendMessage(
       chatId,
-      `✅ <b>All Settled!</b>
+      `✅ <b>All Clear!</b>
 
-No unsettled expenses to settle.`
+No unsettled expenses found. Everyone's accounts are balanced.`
     );
     return res.status(200).send("OK");
   }
 
-  // Reload settlements to get fresh data
-  const currentSettlements = await loadSettlements();
-  let userSettlement = currentSettlements.find(
-    (s) => s.userName === userName
-  );
+  // Get or create settlement record for this user
+  let userSettlement = data.settlements.find((s) => s.userName === userName);
 
-  // If settlement record doesn't exist, create it
   if (!userSettlement) {
-    await saveSettlements([
-      {
-        userName,
-        telegramUserId,
+    // Create new settlement record
+    userSettlement = {
+      userName,
+      telegramUserId,
+      settled: false,
+      lastSettledDate: null,
+    };
+    await saveSettlements([userSettlement]);
+    data.settlements.push(userSettlement);
+  }
+
+  // Check if already marked as settled in current cycle
+  if (userSettlement.settled) {
+    // Double-check: if there are unsettled expenses but user is marked settled,
+    // this might be stale data. Check if last_settled_date is old
+    const lastSettled = userSettlement.lastSettledDate ? new Date(userSettlement.lastSettledDate) : null;
+    const oldestUnsettled = unsettledExpenses.length > 0 
+      ? new Date(Math.min(...unsettledExpenses.map(e => new Date(e.ts))))
+      : null;
+    
+    // If user's settlement date is BEFORE the oldest unsettled expense, reset their status
+    if (lastSettled && oldestUnsettled && lastSettled < oldestUnsettled) {
+      await updateSettlement(userName, {
         settled: false,
         lastSettledDate: null,
-      },
-    ]);
-    userSettlement = { userName, telegramUserId, settled: false, lastSettledDate: null };
-  }
+      });
+      // Don't return - let them settle again
+    } else {
+      await sendMessage(
+        chatId,
+        `✅ <b>Already Settled</b>
 
-  if (userSettlement.settled) {
-    await sendMessage(
-      chatId,
-      `✅ <b>Already Settled</b>
+You're already marked as settled for this cycle.
+Last settled: ${formatDate(userSettlement.lastSettledDate)}
 
-You're already marked as settled.
-Last settled: ${formatDate(userSettlement.lastSettledDate)}`
-    );
-    return res.status(200).send("OK");
+<i>Waiting for others to settle...</i>`
+      );
+      return res.status(200).send("OK");
+    }
   }
 
   // Mark user as settled
@@ -1823,15 +1833,13 @@ Last settled: ${formatDate(userSettlement.lastSettledDate)}`
     telegramUserId,
   });
 
-  // Refresh settlements to check if all are settled
+  // Refresh to get updated data
   const updatedSettlements = await loadSettlements();
   const allSettled = updatedSettlements.every((s) => s.settled);
 
   if (allSettled) {
-    // Mark all unsettled expenses as settled using batch update
+    // Everyone settled - close this cycle
     await settleAllExpenses();
-
-    // Then reset settlement flags
     await resetSettlements();
 
     await sendMessage(

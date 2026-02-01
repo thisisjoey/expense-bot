@@ -75,41 +75,99 @@ async function sendDocument(chatId, fileBuffer, fileName, replyTo = null) {
 async function generateExcelReport() {
   const workbook = new ExcelJS.Workbook();
   
-  // Fetch all data from tables
+  // Fetch all data from tables with individual error handling
+  console.log("Starting data fetch for export...");
+  
+  // Fetch expenses
   const { data: expenses, error: expensesError } = await supabase
     .from("expenses")
     .select("*")
     .order("ts", { ascending: false });
   
-  const { data: activeExpenses, error: activeExpensesError } = await supabase
-    .from("active_expenses")
-    .select("*");
+  if (expensesError) {
+    console.error("Error fetching expenses:", expensesError);
+  }
   
-  const { data: budgetStatus, error: budgetStatusError } = await supabase
-    .from("budget_status")
-    .select("*");
-  
+  // Fetch budgets
   const { data: budgets, error: budgetsError } = await supabase
     .from("budgets")
     .select("*");
   
+  if (budgetsError) {
+    console.error("Error fetching budgets:", budgetsError);
+  }
+  
+  // Fetch members
   const { data: members, error: membersError } = await supabase
     .from("members")
     .select("*");
   
+  if (membersError) {
+    console.error("Error fetching members:", membersError);
+  }
+  
+  // Fetch settlements
   const { data: settlements, error: settlementsError } = await supabase
     .from("settlements")
     .select("*");
   
-  const { data: userExpensePending, error: userExpensePendingError } = await supabase
-    .from("user_expense_pending")
-    .select("*");
-
-  // Check for errors
-  if (expensesError || activeExpensesError || budgetStatusError || 
-      budgetsError || membersError || settlementsError || userExpensePendingError) {
-    throw new Error("Failed to fetch data from database");
+  if (settlementsError) {
+    console.error("Error fetching settlements:", settlementsError);
   }
+  
+  // Try to fetch views - these might not exist, so handle gracefully
+  let activeExpenses = null;
+  let budgetStatus = null;
+  let userExpensePending = null;
+  
+  try {
+    const { data, error } = await supabase
+      .from("active_expenses")
+      .select("*");
+    
+    if (error) {
+      console.log("Note: active_expenses view not available:", error.message);
+    } else {
+      activeExpenses = data;
+    }
+  } catch (e) {
+    console.log("Note: active_expenses view does not exist");
+  }
+  
+  try {
+    const { data, error } = await supabase
+      .from("budget_status")
+      .select("*");
+    
+    if (error) {
+      console.log("Note: budget_status view not available:", error.message);
+    } else {
+      budgetStatus = data;
+    }
+  } catch (e) {
+    console.log("Note: budget_status view does not exist");
+  }
+  
+  try {
+    const { data, error } = await supabase
+      .from("user_expense_pending")
+      .select("*");
+    
+    if (error) {
+      console.log("Note: user_expense_pending view not available:", error.message);
+    } else {
+      userExpensePending = data;
+    }
+  } catch (e) {
+    console.log("Note: user_expense_pending view does not exist");
+  }
+
+  // Check if at least the core tables loaded
+  if (!expenses && !budgets && !members) {
+    throw new Error("Failed to fetch core data from database. Please check database permissions and table names.");
+  }
+
+  console.log("Data fetched successfully, generating Excel...");
 
   // Helper function to create styled sheet
   const createSheet = (name, data, columns) => {
@@ -134,6 +192,9 @@ async function generateExcelReport() {
       data.forEach(row => {
         sheet.addRow(row);
       });
+    } else {
+      // Add a "No data" row if empty
+      sheet.addRow({ [columns[0].key]: 'No data available' });
     }
     
     // Auto-fit columns
@@ -161,80 +222,98 @@ async function generateExcelReport() {
     });
   };
 
-  // 1. Expenses Sheet
-  createSheet('Expenses', expenses, [
-    { header: 'ID', key: 'id', width: 10 },
-    { header: 'User Name', key: 'user_name', width: 20 },
-    { header: 'Amount', key: 'amount', width: 15 },
-    { header: 'Category', key: 'category', width: 20 },
-    { header: 'Comment', key: 'comment', width: 30 },
-    { header: 'Timestamp', key: 'ts', width: 25 },
-    { header: 'Discarded', key: 'discarded', width: 12 },
-    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
-    { header: 'Telegram Message ID', key: 'telegram_message_id', width: 22 },
-    { header: 'Settled', key: 'settled', width: 12 },
-    { header: 'Spent By', key: 'spent_by', width: 20 },
-    { header: 'Expense Type', key: 'expense_type', width: 20 }
-  ]);
+  // 1. Expenses Sheet (Core table - always create)
+  if (expenses) {
+    createSheet('Expenses', expenses, [
+      { header: 'ID', key: 'id', width: 10 },
+      { header: 'User Name', key: 'user_name', width: 20 },
+      { header: 'Amount', key: 'amount', width: 15 },
+      { header: 'Category', key: 'category', width: 20 },
+      { header: 'Comment', key: 'comment', width: 30 },
+      { header: 'Timestamp', key: 'ts', width: 25 },
+      { header: 'Discarded', key: 'discarded', width: 12 },
+      { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
+      { header: 'Telegram Message ID', key: 'telegram_message_id', width: 22 },
+      { header: 'Settled', key: 'settled', width: 12 },
+      { header: 'Spent By', key: 'spent_by', width: 20 },
+      { header: 'Expense Type', key: 'expense_type', width: 20 }
+    ]);
+  }
 
-  // 2. Active Expenses Sheet
-  createSheet('Active Expenses', activeExpenses, [
-    { header: 'ID', key: 'id', width: 10 },
-    { header: 'User Name', key: 'user_name', width: 20 },
-    { header: 'Amount', key: 'amount', width: 15 },
-    { header: 'Category', key: 'category', width: 20 },
-    { header: 'Comment', key: 'comment', width: 30 },
-    { header: 'Timestamp', key: 'ts', width: 25 },
-    { header: 'Discarded', key: 'discarded', width: 12 },
-    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
-    { header: 'Telegram Message ID', key: 'telegram_message_id', width: 22 },
-    { header: 'Display Name', key: 'display_name', width: 20 },
-    { header: 'Username', key: 'username', width: 20 },
-    { header: 'Category Budget', key: 'category_budget', width: 18 }
-  ]);
+  // 2. Budgets Sheet (Core table - always create)
+  if (budgets) {
+    createSheet('Budgets', budgets, [
+      { header: 'Category', key: 'category', width: 20 },
+      { header: 'Budget', key: 'budget', width: 15 }
+    ]);
+  }
 
-  // 3. Budget Status Sheet
-  createSheet('Budget Status', budgetStatus, [
-    { header: 'Category', key: 'category', width: 20 },
-    { header: 'Budget', key: 'budget', width: 15 },
-    { header: 'Spent', key: 'spent', width: 15 },
-    { header: 'Remaining', key: 'remaining', width: 15 },
-    { header: 'Percent Used', key: 'percent_used', width: 18 }
-  ]);
+  // 3. Members Sheet (Core table - always create)
+  if (members) {
+    createSheet('Members', members, [
+      { header: 'User Name', key: 'user_name', width: 20 },
+      { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
+      { header: 'Display Name', key: 'display_name', width: 20 },
+      { header: 'Username', key: 'username', width: 20 }
+    ]);
+  }
 
-  // 4. Budgets Sheet
-  createSheet('Budgets', budgets, [
-    { header: 'Category', key: 'category', width: 20 },
-    { header: 'Budget', key: 'budget', width: 15 }
-  ]);
+  // 4. Settlements Sheet (Core table - always create)
+  if (settlements) {
+    createSheet('Settlements', settlements, [
+      { header: 'User Name', key: 'user_name', width: 20 },
+      { header: 'Settled', key: 'settled', width: 12 },
+      { header: 'Last Settled Date', key: 'last_settled_date', width: 25 },
+      { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 }
+    ]);
+  }
 
-  // 5. Members Sheet
-  createSheet('Members', members, [
-    { header: 'User Name', key: 'user_name', width: 20 },
-    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
-    { header: 'Display Name', key: 'display_name', width: 20 },
-    { header: 'Username', key: 'username', width: 20 }
-  ]);
+  // 5. Active Expenses Sheet (Optional view)
+  if (activeExpenses) {
+    createSheet('Active Expenses', activeExpenses, [
+      { header: 'ID', key: 'id', width: 10 },
+      { header: 'User Name', key: 'user_name', width: 20 },
+      { header: 'Amount', key: 'amount', width: 15 },
+      { header: 'Category', key: 'category', width: 20 },
+      { header: 'Comment', key: 'comment', width: 30 },
+      { header: 'Timestamp', key: 'ts', width: 25 },
+      { header: 'Discarded', key: 'discarded', width: 12 },
+      { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 },
+      { header: 'Telegram Message ID', key: 'telegram_message_id', width: 22 },
+      { header: 'Display Name', key: 'display_name', width: 20 },
+      { header: 'Username', key: 'username', width: 20 },
+      { header: 'Category Budget', key: 'category_budget', width: 18 }
+    ]);
+  }
 
-  // 6. Settlements Sheet
-  createSheet('Settlements', settlements, [
-    { header: 'User Name', key: 'user_name', width: 20 },
-    { header: 'Settled', key: 'settled', width: 12 },
-    { header: 'Last Settled Date', key: 'last_settled_date', width: 25 },
-    { header: 'Telegram User ID', key: 'telegram_user_id', width: 18 }
-  ]);
+  // 6. Budget Status Sheet (Optional view)
+  if (budgetStatus) {
+    createSheet('Budget Status', budgetStatus, [
+      { header: 'Category', key: 'category', width: 20 },
+      { header: 'Budget', key: 'budget', width: 15 },
+      { header: 'Spent', key: 'spent', width: 15 },
+      { header: 'Remaining', key: 'remaining', width: 15 },
+      { header: 'Percent Used', key: 'percent_used', width: 18 }
+    ]);
+  }
 
-  // 7. User Expense Pending Sheet
-  createSheet('User Expense Pending', userExpensePending, [
-    { header: 'User Name', key: 'user_name', width: 20 },
-    { header: 'Display Name', key: 'display_name', width: 20 },
-    { header: 'Username', key: 'username', width: 20 },
-    { header: 'Total Spent', key: 'total_spent', width: 15 },
-    { header: 'Expense Count', key: 'expense_count', width: 18 }
-  ]);
+  // 7. User Expense Pending Sheet (Optional view)
+  if (userExpensePending) {
+    createSheet('User Expense Pending', userExpensePending, [
+      { header: 'User Name', key: 'user_name', width: 20 },
+      { header: 'Display Name', key: 'display_name', width: 20 },
+      { header: 'Username', key: 'username', width: 20 },
+      { header: 'Total Spent', key: 'total_spent', width: 15 },
+      { header: 'Expense Count', key: 'expense_count', width: 18 }
+    ]);
+  }
 
+  console.log("Excel generation complete, creating buffer...");
+  
   // Generate buffer
   const buffer = await workbook.xlsx.writeBuffer();
+  
+  console.log("Export successful!");
   return buffer;
 }
 

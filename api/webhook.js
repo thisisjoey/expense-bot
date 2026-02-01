@@ -1765,77 +1765,99 @@ Per person: ₹${perPerson.toFixed(2)}`
 
     /* ================= SETTLED COMMAND - UPDATED ================= */
 
-    if (text === "/settled") {
-      // Reload settlements to get fresh data (important!)
-      const currentSettlements = await loadSettlements();
-      const userSettlement = currentSettlements.find(
-        (s) => s.userName === userName
-      );
+if (text === "/settled") {
+  // First check if user has any unsettled expenses
+  const userUnsettledExpenses = data.expenses.filter(
+    (e) => !e.discarded && !e.settled && e.userName === userName
+  );
 
-      if (!userSettlement) {
-        await sendMessage(
-          chatId,
-          `❌ <b>Error</b>
+  // Also check if there are ANY unsettled expenses at all (for split scenarios)
+  const anyUnsettledExpenses = data.expenses.filter(
+    (e) => !e.discarded && !e.settled
+  );
 
-Could not find your settlement record.`
-        );
-        return res.status(200).send("OK");
-      }
+  if (anyUnsettledExpenses.length === 0) {
+    await sendMessage(
+      chatId,
+      `✅ <b>All Settled!</b>
 
-      if (userSettlement.settled) {
-        await sendMessage(
-          chatId,
-          `✅ <b>Already Settled</b>
+No unsettled expenses to settle.`
+    );
+    return res.status(200).send("OK");
+  }
+
+  // Reload settlements to get fresh data
+  const currentSettlements = await loadSettlements();
+  let userSettlement = currentSettlements.find(
+    (s) => s.userName === userName
+  );
+
+  // If settlement record doesn't exist, create it
+  if (!userSettlement) {
+    await saveSettlements([
+      {
+        userName,
+        telegramUserId,
+        settled: false,
+        lastSettledDate: null,
+      },
+    ]);
+    userSettlement = { userName, telegramUserId, settled: false, lastSettledDate: null };
+  }
+
+  if (userSettlement.settled) {
+    await sendMessage(
+      chatId,
+      `✅ <b>Already Settled</b>
 
 You're already marked as settled.
 Last settled: ${formatDate(userSettlement.lastSettledDate)}`
-        );
-        return res.status(200).send("OK");
-      }
+    );
+    return res.status(200).send("OK");
+  }
 
-      // Mark user as settled
-      await updateSettlement(userName, {
-        settled: true,
-        lastSettledDate: now(),
-        telegramUserId,
-      });
+  // Mark user as settled
+  await updateSettlement(userName, {
+    settled: true,
+    lastSettledDate: now(),
+    telegramUserId,
+  });
 
-      // Refresh settlements to check if all are settled
-      const updatedSettlements = await loadSettlements();
-      const allSettled = updatedSettlements.every((s) => s.settled);
+  // Refresh settlements to check if all are settled
+  const updatedSettlements = await loadSettlements();
+  const allSettled = updatedSettlements.every((s) => s.settled);
 
-      if (allSettled) {
-        // NEW APPROACH: Mark all unsettled expenses as settled using batch update
-        await settleAllExpenses();
+  if (allSettled) {
+    // Mark all unsettled expenses as settled using batch update
+    await settleAllExpenses();
 
-        // Then reset settlement flags
-        await resetSettlements();
+    // Then reset settlement flags
+    await resetSettlements();
 
-        await sendMessage(
-          chatId,
-          `🎉 <b>All Settled!</b>
+    await sendMessage(
+      chatId,
+      `🎉 <b>All Settled!</b>
 
 Everyone has settled up!
 All expenses marked as settled.
 
 <i>Start fresh! New expenses will be tracked separately.</i>`
-        );
-      } else {
-        const settledCount = updatedSettlements.filter((s) => s.settled).length;
-        const totalCount = updatedSettlements.length;
+    );
+  } else {
+    const settledCount = updatedSettlements.filter((s) => s.settled).length;
+    const totalCount = updatedSettlements.length;
 
-        await sendMessage(
-          chatId,
-          `✅ <b>Marked as Settled</b>
+    await sendMessage(
+      chatId,
+      `✅ <b>Marked as Settled</b>
 
 Status: ${settledCount}/${totalCount} members settled
 <i>Waiting for others to settle...</i>`
-        );
-      }
+    );
+  }
 
-      return res.status(200).send("OK");
-    }
-
+  return res.status(200).send("OK");
+}
     /* ================= REVERT COMMAND ================= */
 
     if (text === "/revert") {

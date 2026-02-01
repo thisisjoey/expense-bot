@@ -1766,7 +1766,9 @@ Per person: ₹${perPerson.toFixed(2)}`
     /* ================= SETTLED COMMAND - UPDATED ================= */
 
     if (text === "/settled") {
-      const userSettlement = data.settlements.find(
+      // Reload settlements to get fresh data (important!)
+      const currentSettlements = await loadSettlements();
+      const userSettlement = currentSettlements.find(
         (s) => s.userName === userName
       );
 

@@ -2297,7 +2297,7 @@ Expense not found or already reverted.`
       return res.status(200).send("OK");
     }
 
-    /* ================= DELETE ALL EXPENSES (ADMIN) ================= */
+/* ================= DELETE ALL EXPENSES (ADMIN) ================= */
     if (text === "/clearall") {
       const activeCount = data.expenses.filter((e) => !e.discarded).length;
 
@@ -2306,16 +2306,31 @@ Expense not found or already reverted.`
         return res.status(200).send("OK");
       }
 
-      // Mark all as discarded
-      for (const expense of data.expenses) {
-        if (!expense.discarded) {
-          await updateExpense(expense.id, { discarded: true });
+      // Get IDs of all active expenses
+      const activeExpenseIds = data.expenses
+        .filter((e) => !e.discarded)
+        .map((e) => e.id);
+
+      // Actually delete from database
+      if (activeExpenseIds.length > 0) {
+        const { error } = await supabase
+          .from("expenses")
+          .delete()
+          .in("id", activeExpenseIds);
+
+        if (error) {
+          console.error("Error deleting expenses:", error);
+          await sendMessage(
+            chatId,
+            `❌ <b>Error</b>\n\nFailed to delete expenses: ${error.message}`
+          );
+          return res.status(200).send("OK");
         }
       }
 
       await sendMessage(
         chatId,
-        `🗑️ <b>Cleared ${activeCount} expenses</b>`
+        `🗑️ <b>Deleted ${activeCount} expenses</b>\n\n<i>All rows have been permanently removed from the database.</i>`
       );
       return res.status(200).send("OK");
     }
